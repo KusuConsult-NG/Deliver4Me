@@ -7,6 +7,7 @@ import 'package:deliver4me_mobile/services/order_service.dart';
 import 'package:deliver4me_mobile/models/order_model.dart';
 import 'package:deliver4me_mobile/config/firebase_config.dart';
 import 'package:deliver4me_mobile/screens/sender/payment_confirmation_screen.dart';
+import 'package:deliver4me_mobile/screens/payment/paystack_webview_screen.dart';
 import 'package:uuid/uuid.dart';
 
 class SelectPaymentMethodScreen extends ConsumerStatefulWidget {
@@ -124,33 +125,59 @@ class _SelectPaymentMethodScreenState
         reference: reference,
       );
 
-      // In a real app, you would open result['authorization_url'] in a webview
-      // For demo purposes, we'll simulate a successful payment
-      // TODO: Implement webview for Paystack payment
-      await Future.delayed(const Duration(seconds: 1));
+      // Open Paystack webview for payment
+      final authUrl = result['authorization_url'];
 
-      // Verify payment (in real app, this would be after webview returns)
-      final verifiedResult = await paymentService.verifyTransaction(reference);
-
-      if (verifiedResult['status'] == 'success') {
-        // Update order status
-        await orderService.updateOrderStatus(
-            widget.orderId, OrderStatus.pending);
-
-        if (mounted) {
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(
-              builder: (context) => PaymentConfirmationScreen(
-                orderId: widget.orderId,
-                amount: widget.amount,
-                paymentMethod: 'Card',
-              ),
+      if (mounted) {
+        final paymentResult = await Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => PaystackWebviewScreen(
+              authorizationUrl: authUrl,
+              reference: reference,
             ),
-          );
+          ),
+        );
+
+        // Check payment result
+        if (paymentResult != null && paymentResult['success'] == true) {
+          // Verify payment with backend
+          final verifiedResult =
+              await paymentService.verifyTransaction(reference);
+
+          if (verifiedResult['status'] == 'success') {
+            // Update order status
+            await orderService.updateOrderStatus(
+                widget.orderId, OrderStatus.pending);
+
+            if (mounted) {
+              Navigator.pushReplacement(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => PaymentConfirmationScreen(
+                    orderId: widget.orderId,
+                    amount: widget.amount,
+                    paymentMethod: 'Card',
+                  ),
+                ),
+              );
+            }
+          } else {
+            throw Exception('Payment verification failed');
+          }
+        } else if (paymentResult?['cancelled'] == true) {
+          // User cancelled payment
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Payment cancelled'),
+                backgroundColor: Colors.orange,
+              ),
+            );
+          }
+        } else {
+          throw Exception('Payment failed');
         }
-      } else {
-        throw Exception('Payment verification failed');
       }
     } catch (e) {
       throw Exception('Card payment failed: $e');

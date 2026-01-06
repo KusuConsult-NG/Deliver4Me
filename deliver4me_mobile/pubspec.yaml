@@ -45,6 +45,9 @@ dependencies:
   
   # Local Storage
   shared_preferences: ^2.2.2
+  
+  # Webview for payments
+  webview_flutter: ^4.10.0
 
 dev_dependencies:
   flutter_test:
