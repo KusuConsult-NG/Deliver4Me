@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1004556799748",
+    "project_id": "deliver4me-22bcf",
+    "storage_bucket": "deliver4me-22bcf.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1004556799748:android:e8fc71903756d0dc674a51",
+        "android_client_info": {
+          "package_name": "ng.deliverme.deliver4me_mobile"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBivrNjmaMF1CjX24x4lzbld-m9Gq-tYN4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
