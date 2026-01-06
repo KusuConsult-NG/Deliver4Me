@@ -124,12 +124,9 @@ class _SelectPaymentMethodScreenState
         reference: reference,
       );
 
-      // In a real app, you would open the authorization_url in a webview
+      // In a real app, you would open result['authorization_url'] in a webview
       // For demo purposes, we'll simulate a successful payment
-      final authUrl = result['authorization_url'];
-
-      // TODO: Open webview with authUrl
-      // For now, simulate payment after delay
+      // TODO: Implement webview for Paystack payment
       await Future.delayed(const Duration(seconds: 1));
 
       // Verify payment (in real app, this would be after webview returns)
