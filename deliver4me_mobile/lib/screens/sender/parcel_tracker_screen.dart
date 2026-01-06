@@ -1,470 +1,372 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:deliver4me_mobile/providers/order_provider.dart';
+import 'package:deliver4me_mobile/models/order_model.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
-import 'package:deliver4me_mobile/shared/location_service.dart';
-import 'package:deliver4me_mobile/widgets/map_widget.dart';
-import 'dart:async';
 
-class ParcelTrackerScreen extends StatefulWidget {
-  const ParcelTrackerScreen({super.key});
+class ParcelTrackerScreen extends ConsumerWidget {
+  final String orderId;
 
-  @override
-  State<ParcelTrackerScreen> createState() => _ParcelTrackerScreenState();
-}
-
-class _ParcelTrackerScreenState extends State<ParcelTrackerScreen> {
-  final LatLng _pickupLocation = const LatLng(40.7128, -74.0060);
-  final LatLng _dropoffLocation = const LatLng(40.7489, -73.9680);
-  LatLng _riderLocation = const LatLng(40.7308, -73.9973);
-  StreamSubscription? _locationSubscription;
+  const ParcelTrackerScreen({
+    super.key,
+    required this.orderId,
+  });
 
   @override
-  void initState() {
-    super.initState();
-    _startTracking();
-  }
-
-  @override
-  void dispose() {
-    _locationSubscription?.cancel();
-    super.dispose();
-  }
-
-  void _startTracking() {
-    // Simulate rider movement for demo
-    Timer.periodic(const Duration(seconds: 3), (timer) {
-      if (mounted) {
-        setState(() {
-          _riderLocation = LatLng(
-            _riderLocation.latitude + 0.001,
-            _riderLocation.longitude + 0.001,
-          );
-        });
-      } else {
-        timer.cancel();
-      }
-    });
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final routePoints = [_pickupLocation, _riderLocation, _dropoffLocation];
+  Widget build(BuildContext context, WidgetRef ref) {
+    // Stream the order in real-time
+    final orderStream = ref.watch(orderStreamProvider(orderId));
 
     return Scaffold(
-      backgroundColor: const Color(0xFF101622),
       appBar: AppBar(
-        backgroundColor: const Color(0xFF101622),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back),
           onPressed: () => Navigator.pop(context),
         ),
-        title: const Text('Track Delivery'),
+        title: const Text('Track Parcel'),
         centerTitle: true,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.more_vert),
-            onPressed: () {},
+      ),
+      body: orderStream.when(
+        data: (order) {
+          if (order == null) {
+            return const Center(child: Text('Order not found'));
+          }
+
+          return _buildTrackingView(context, order);
+        },
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (error, stack) => Center(
+          child: Text('Error loading order: $error'),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTrackingView(BuildContext context, OrderModel order) {
+    return Stack(
+      children: [
+        // Map View
+        FlutterMap(
+          options: MapOptions(
+            initialCenter: LatLng(
+              order.pickup.latitude,
+              order.pickup.longitude,
+            ),
+            initialZoom: 13.0,
+          ),
+          children: [
+            TileLayer(
+              urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+              userAgentPackageName: 'com.deliver4me.app',
+            ),
+            MarkerLayer(
+              markers: [
+                // Pickup marker
+                Marker(
+                  point: LatLng(order.pickup.latitude, order.pickup.longitude),
+                  width: 40,
+                  height: 40,
+                  child: const Icon(
+                    Icons.radio_button_checked,
+                    color: Color(0xFF135BEC),
+                    size: 40,
+                  ),
+                ),
+                // Dropoff marker
+                Marker(
+                  point:
+                      LatLng(order.dropoff.latitude, order.dropoff.longitude),
+                  width: 40,
+                  height: 40,
+                  child: const Icon(
+                    Icons.location_on,
+                    color: Colors.red,
+                    size: 40,
+                  ),
+                ),
+                // Rider marker (if assigned)
+                if (order.riderId != null && order.riderLocation != null)
+                  Marker(
+                    point: LatLng(
+                      order.riderLocation!['latitude'],
+                      order.riderLocation!['longitude'],
+                    ),
+                    width: 50,
+                    height: 50,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        shape: BoxShape.circle,
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.2),
+                            blurRadius: 10,
+                          ),
+                        ],
+                      ),
+                      child: const Icon(
+                        Icons.motorcycle,
+                        color: Color(0xFF135BEC),
+                        size: 30,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ],
+        ),
+
+        // Status overlay
+        Positioned(
+          top: 16,
+          left: 16,
+          right: 16,
+          child: _buildStatusCard(order),
+        ),
+
+        // Bottom sheet
+        Positioned(
+          bottom: 0,
+          left: 0,
+          right: 0,
+          child: _buildBottomSheet(context, order),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildStatusCard(OrderModel order) {
+    Color statusColor;
+    String statusText;
+
+    switch (order.status) {
+      case 'pending':
+        statusColor = Colors.orange;
+        statusText = 'Finding Rider...';
+        break;
+      case 'accepted':
+        statusColor = Color(0xFF135BEC);
+        statusText = 'Rider Assigned';
+        break;
+      case 'picked_up':
+        statusColor = Colors.green;
+        statusText = 'In Transit';
+        break;
+      case 'delivered':
+        statusColor = Colors.green;
+        statusText = 'Delivered';
+        break;
+      default:
+        statusColor = Colors.grey;
+        statusText = order.status.toUpperCase();
+    }
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: statusColor,
+        borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.2),
+            blurRadius: 10,
           ),
         ],
       ),
-      body: Column(
+      child: Row(
         children: [
-          // Map Area with Real Tracking
+          const Icon(Icons.info_outline, color: Colors.white),
+          const SizedBox(width: 12),
           Expanded(
-            flex: 3,
-            child: Stack(
-              children: [
-                MapWidget(
-                  center: _riderLocation,
-                  zoom: 14,
-                  markers: [
-                    // Pickup marker
-                    MapWidget.buildMarker(
-                      point: _pickupLocation,
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF135BEC),
-                          shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white, width: 3),
-                        ),
-                        child: const Icon(
-                          Icons.radio_button_checked,
-                          color: Colors.white,
-                          size: 20,
-                        ),
-                      ),
-                    ),
-                    // Rider marker (moving)
-                    MapWidget.buildMarker(
-                      point: _riderLocation,
-                      width: 50,
-                      height: 50,
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF10B981),
-                          shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white, width: 3),
-                          boxShadow: [
-                            BoxShadow(
-                              color: const Color(0xFF10B981).withValues(alpha: 0.5),
-                              blurRadius: 10,
-                              spreadRadius: 2,
-                            ),
-                          ],
-                        ),
-                        child: const Icon(
-                          Icons.two_wheeler,
-                          color: Colors.white,
-                          size: 24,
-                        ),
-                      ),
-                    ),
-                    // Dropoff marker
-                    MapWidget.buildMarker(
-                      point: _dropoffLocation,
-                      child: Container(
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF92A4C9),
-                          shape: BoxShape.circle,
-                          border: Border.all(color: Colors.white, width: 3),
-                        ),
-                        child: const Icon(
-                          Icons.location_on,
-                          color: Colors.white,
-                          size: 20,
-                        ),
-                      ),
-                    ),
-                  ],
-                  polylines: [
-                    MapWidget.buildPolyline(
-                      points: routePoints,
-                      color: const Color(0xFF135BEC),
-                      strokeWidth: 3,
-                    ),
-                  ],
-                ),
+            child: Text(
+              statusText,
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          if (order.estimatedArrival != null)
+            Text(
+              'ETA: ${_formatTime(order.estimatedArrival!)}',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 14,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 
-                // Rider info card
-                Positioned(
-                  top: 16,
-                  left: 16,
-                  right: 16,
-                  child: Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF192233).withValues(alpha: 0.95),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: const Color(0xFF324467),
-                      ),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.3),
-                          blurRadius: 16,
-                        ),
-                      ],
-                    ),
-                    child: Row(
-                      children: [
-                        Container(
-                          width: 48,
-                          height: 48,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                              color: const Color(0xFF10B981),
-                              width: 2,
-                            ),
-                            color: Colors.grey[700],
-                          ),
-                          child: const Icon(
-                            Icons.person,
-                            color: Colors.white,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        const Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Text(
-                                    'Marcus Johnson',
-                                    style: TextStyle(
-                                      color: Colors.white,
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
-                                  SizedBox(width: 6),
-                                  Icon(
-                                    Icons.verified,
-                                    color: Color(0xFF135BEC),
-                                    size: 16,
-                                  ),
-                                ],
-                              ),
-                              SizedBox(height: 4),
-                              Row(
-                                children: [
-                                  Icon(
-                                    Icons.star,
-                                    color: Color(0xFFF59E0B),
-                                    size: 14,
-                                  ),
-                                  SizedBox(width: 4),
-                                  Text(
-                                    '4.9 • 350 deliveries',
-                                    style: TextStyle(
-                                      color: Color(0xFF92A4C9),
-                                      fontSize: 12,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-                        Container(
-                          width: 40,
-                          height: 40,
-                          decoration: const BoxDecoration(
-                            color: Color(0xFF135BEC),
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Icon(
-                            Icons.call,
-                            color: Colors.white,
-                            size: 20,
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Container(
-                          width: 40,
-                          height: 40,
-                          decoration: const BoxDecoration(
-                            color: Color(0xFF324467),
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Icon(
-                            Icons.message,
-                            color: Colors.white,
-                            size: 20,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-
-                // Live ETA Badge
-                Positioned(
-                  bottom: 16,
-                  right: 16,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 12,
-                    ),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF10B981),
-                      borderRadius: BorderRadius.circular(12),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.3),
-                          blurRadius: 12,
-                        ),
-                      ],
-                    ),
-                    child: const Column(
-                      children: [
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.access_time,
-                              color: Colors.white,
-                              size: 14,
-                            ),
-                            SizedBox(width: 4),
-                            Text(
-                              'LIVE ETA',
-                              style: TextStyle(
-                                color: Colors.white70,
-                                fontSize: 10,
-                                fontWeight: FontWeight.w500,
-                                letterSpacing: 0.8,
-                              ),
-                            ),
-                          ],
-                        ),
-                        SizedBox(height: 4),
-                        Text(
-                          '12 min',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ],
+  Widget _buildBottomSheet(BuildContext context, OrderModel order) {
+    return Container(
+      decoration: BoxDecoration(
+        color: Theme.of(context).scaffoldBackgroundColor,
+        borderRadius: const BorderRadius.only(
+          topLeft: Radius.circular(20),
+          topRight: Radius.circular(20),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.1),
+            blurRadius: 10,
+            offset: const Offset(0, -5),
+          ),
+        ],
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // Drag handle
+          Container(
+            margin: const EdgeInsets.only(top: 8),
+            width: 40,
+            height: 4,
+            decoration: BoxDecoration(
+              color: Colors.grey[700],
+              borderRadius: BorderRadius.circular(2),
             ),
           ),
 
-          // Details Section (same as before)
-          Expanded(
-            flex: 2,
-            child: Container(
-              decoration: const BoxDecoration(
-                color: Color(0xFF192233),
-                border: Border(
-                  top: BorderSide(
-                    color: Color(0xFF324467),
-                  ),
-                ),
-              ),
-              child: ListView(
-                padding: const EdgeInsets.all(16),
-                children: [
-                  Container(
-                    width: 48,
-                    height: 6,
-                    margin: const EdgeInsets.only(bottom: 20),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF324467),
-                      borderRadius: BorderRadius.circular(3),
+          Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Rider info (if assigned)
+                if (order.riderId != null) ...[
+                  const Text(
+                    'Your Rider',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Colors.grey,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
-
-                  // Status
+                  const SizedBox(height: 8),
                   Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
-                      const Text(
-                        'STATUS',
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.grey,
-                          letterSpacing: 0.8,
-                        ),
+                      CircleAvatar(
+                        radius: 24,
+                        backgroundColor: Color(0xFF135BEC),
+                        child: const Icon(Icons.person, color: Colors.white),
                       ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 4,
-                        ),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF10B981).withValues(alpha: 0.1),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: const Color(0xFF10B981).withValues(alpha: 0.3),
-                          ),
-                        ),
-                        child: const Row(
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Icon(
-                              Icons.two_wheeler,
-                              color: Color(0xFF10B981),
-                              size: 14,
-                            ),
-                            SizedBox(width: 6),
                             Text(
-                              'In Transit',
-                              style: TextStyle(
-                                color: Color(0xFF10B981),
-                                fontSize: 12,
-                                fontWeight: FontWeight.w600,
+                              order.riderName ?? 'Rider',
+                              style: const TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            Text(
+                              order.riderPhone ?? '',
+                              style: const TextStyle(
+                                fontSize: 14,
+                                color: Colors.grey,
                               ),
                             ),
                           ],
                         ),
                       ),
+                      IconButton(
+                        icon: const Icon(Icons.phone),
+                        onPressed: () {
+                          // Call rider
+                        },
+                      ),
                     ],
                   ),
+                  const Divider(height: 32),
+                ],
 
-                  const SizedBox(height: 24),
+                // Timeline
+                const Text(
+                  'Delivery Timeline',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.grey,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 16),
 
-                  // Timeline
+                _buildTimelineItem(
+                  'Order Confirmed',
+                  _formatTime(order.createdAt),
+                  true,
+                ),
+                if (order.acceptedAt != null)
                   _buildTimelineItem(
-                    Icons.check_circle,
+                    'Rider Assigned',
+                    _formatTime(order.acceptedAt!),
+                    true,
+                  ),
+                if (order.pickedUpAt != null)
+                  _buildTimelineItem(
                     'Package Picked Up',
-                    '123 Main St, Downtown',
-                    '2:15 PM',
+                    _formatTime(order.pickedUpAt!),
                     true,
                   ),
-                  _buildTimelineItem(
-                    Icons.radio_button_checked,
-                    'In Transit',
-                    'On the way to destination',
-                    '2:30 PM',
-                    true,
-                  ),
-                  _buildTimelineItem(
-                    Icons.location_on,
-                    'Out for Delivery',
-                    '450 Highland Ave',
-                    'Pending',
-                    false,
-                  ),
+                _buildTimelineItem(
+                  'Delivered',
+                  order.deliveredAt != null
+                      ? _formatTime(order.deliveredAt!)
+                      : 'Pending',
+                  order.deliveredAt != null,
+                  isLast: true,
+                ),
 
-                  const SizedBox(height: 24),
+                const SizedBox(height: 16),
 
-                  // Delivery Code
+                // Delivery code (if in transit)
+                if (order.status == 'picked_up' || order.status == 'accepted')
                   Container(
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF1C2536),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: const Color(0xFF324467).withValues(alpha: 0.5),
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFF135BEC), Color(0xFF0A3489)],
                       ),
+                      borderRadius: BorderRadius.circular(12),
                     ),
-                    child: const Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                    child: Column(
                       children: [
-                        Text(
-                          'DELIVERY CODE',
+                        const Text(
+                          'Delivery Code',
                           style: TextStyle(
-                            fontSize: 10,
+                            color: Colors.white70,
+                            fontSize: 12,
+                          ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          order.deliveryCode,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 32,
                             fontWeight: FontWeight.bold,
-                            color: Colors.grey,
-                            letterSpacing: 0.8,
+                            letterSpacing: 8,
                           ),
                         ),
-                        SizedBox(height: 12),
-                        Center(
-                          child: Text(
-                            '2847',
-                            style: TextStyle(
-                              color: Color(0xFF135BEC),
-                              fontSize: 40,
-                              fontWeight: FontWeight.bold,
-                              letterSpacing: 16,
-                            ),
-                          ),
-                        ),
-                        SizedBox(height: 8),
-                        Center(
-                          child: Text(
-                            'Share this code with your rider',
-                            style: TextStyle(
-                              color: Color(0xFF92A4C9),
-                              fontSize: 12,
-                            ),
+                        const SizedBox(height: 4),
+                        const Text(
+                          'Share this code with the rider',
+                          style: TextStyle(
+                            color: Colors.white70,
+                            fontSize: 12,
                           ),
                         ),
                       ],
                     ),
                   ),
-                ],
-              ),
+              ],
             ),
           ),
         ],
@@ -472,79 +374,69 @@ class _ParcelTrackerScreenState extends State<ParcelTrackerScreen> {
     );
   }
 
-  Widget _buildTimelineItem(
-    IconData icon,
-    String title,
-    String subtitle,
-    String time,
-    bool isComplete,
-  ) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 20),
-      child: Row(
-        children: [
-          Column(
-            children: [
-              Container(
-                width: 32,
-                height: 32,
-                decoration: BoxDecoration(
-                  color: isComplete
-                      ? const Color(0xFF135BEC)
-                      : const Color(0xFF324467),
-                  shape: BoxShape.circle,
-                ),
-                child: Icon(
-                  icon,
-                  color: Colors.white,
-                  size: 18,
+  Widget _buildTimelineItem(String title, String time, bool isCompleted,
+      {bool isLast = false}) {
+    return Row(
+      children: [
+        Column(
+          children: [
+            Container(
+              width: 20,
+              height: 20,
+              decoration: BoxDecoration(
+                color: isCompleted ? Colors.green : Colors.grey[700],
+                shape: BoxShape.circle,
+                border: Border.all(
+                  color: isCompleted ? Colors.green : Colors.grey,
+                  width: 2,
                 ),
               ),
-              if (subtitle != 'On the way to destination' &&
-                  subtitle != '450 Highland Ave')
-                Container(
-                  width: 2,
-                  height: 32,
-                  margin: const EdgeInsets.symmetric(vertical: 4),
-                  color: isComplete
-                      ? const Color(0xFF135BEC).withValues(alpha: 0.5)
-                      : const Color(0xFF324467),
+              child: isCompleted
+                  ? const Icon(
+                      Icons.check,
+                      color: Colors.white,
+                      size: 12,
+                    )
+                  : null,
+            ),
+            if (!isLast)
+              Container(
+                width: 2,
+                height: 30,
+                color: isCompleted ? Colors.green : Colors.grey[700],
+              ),
+          ],
+        ),
+        const SizedBox(width: 16),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                title,
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: isCompleted ? FontWeight.w600 : FontWeight.normal,
+                  color: isCompleted ? Colors.white : Colors.grey,
                 ),
+              ),
+              Text(
+                time,
+                style: const TextStyle(
+                  fontSize: 12,
+                  color: Colors.grey,
+                ),
+              ),
             ],
           ),
-          const SizedBox(width: 16),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: TextStyle(
-                    color: isComplete ? Colors.white : const Color(0xFF92A4C9),
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                const SizedBox(height: 4),
-                Text(
-                  subtitle,
-                  style: const TextStyle(
-                    color: Color(0xFF92A4C9),
-                    fontSize: 14,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          Text(
-            time,
-            style: const TextStyle(
-              color: Color(0xFF92A4C9),
-              fontSize: 12,
-            ),
-          ),
-        ],
-      ),
+        ),
+      ],
     );
+  }
+
+  String _formatTime(DateTime time) {
+    final hour = time.hour % 12 == 0 ? 12 : time.hour % 12;
+    final period = time.hour >= 12 ? 'PM' : 'AM';
+    return '${hour}:${time.minute.toString().padLeft(2, '0')} $period';
   }
 }

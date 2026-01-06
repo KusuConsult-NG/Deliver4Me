@@ -1,551 +1,325 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:deliver4me_mobile/providers/auth_provider.dart';
+import 'package:deliver4me_mobile/providers/order_provider.dart';
+import 'package:deliver4me_mobile/models/order_model.dart';
+import 'package:deliver4me_mobile/services/user_service.dart';
 
-class AvailableJobsScreen extends StatelessWidget {
+class AvailableJobsScreen extends ConsumerStatefulWidget {
   const AvailableJobsScreen({super.key});
 
   @override
+  ConsumerState<AvailableJobsScreen> createState() =>
+      _AvailableJobsScreenState();
+}
+
+class _AvailableJobsScreenState extends ConsumerState<AvailableJobsScreen> {
+  final userService = UserService();
+  bool isOnline = true;
+  String filterType = 'all';
+
+  Future<void> _toggleOnlineStatus() async {
+    final authState = ref.read(authStateProvider);
+    final user = authState.value;
+
+    if (user != null) {
+      setState(() => isOnline = !isOnline);
+
+      await userService.updateRiderStatus(user.uid, isOnline);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content:
+                Text(isOnline ? 'You are now online' : 'You are now offline'),
+            backgroundColor: isOnline ? Colors.green : Colors.grey,
+          ),
+        );
+      }
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final availableJobsStream = ref.watch(availableJobsProvider);
+
     return Scaffold(
-      backgroundColor: const Color(0xFF101622),
-      body: SafeArea(
-        child: Column(
-          children: [
-            // Header
-            Padding(
-              padding: const EdgeInsets.all(16.0),
-              child: Column(
-                children: [
-                  Row(
-                    children: [
-                      Container(
-                        width: 40,
-                        height: 40,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          border: Border.all(
-                            color: const Color(0xFF135BEC),
-                            width: 2,
-                          ),
-                          image: const DecorationImage(
-                            image:
-                                NetworkImage('https://placeholder.pics/svg/40'),
-                            fit: BoxFit.cover,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'WELCOME BACK',
-                              style: TextStyle(
-                                fontSize: 10,
-                                fontWeight: FontWeight.w500,
-                                color: Colors.grey[500],
-                                letterSpacing: 1.2,
-                              ),
-                            ),
-                            const Text(
-                              'Alex Mitchell',
-                              style: TextStyle(
-                                fontSize: 18,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.white,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 6,
-                        ),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF1E293B),
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(
-                            color: const Color(0xFF324467),
-                          ),
-                        ),
-                        child: const Row(
-                          children: [
-                            Icon(
-                              Icons.account_balance_wallet,
-                              color: Color(0xFF135BEC),
-                              size: 18,
-                            ),
-                            SizedBox(width: 6),
-                            Text(
-                              '\$124.00',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 14,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF1E293B),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: const Color(0xFF324467)),
-                    ),
-                    child: Row(
-                      children: [
-                        Container(
-                          width: 32,
-                          height: 32,
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF135BEC).withValues(alpha: 0.2),
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Icon(
-                            Icons.rss_feed,
-                            color: Color(0xFF135BEC),
-                            size: 18,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        const Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                'You are Online',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 14,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              Text(
-                                'Receiving job alerts',
-                                style: TextStyle(
-                                  color: Colors.grey,
-                                  fontSize: 12,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        Switch(
-                          value: true,
-                          onChanged: (value) {},
-                          activeColor: const Color(0xFF135BEC),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            // Filters
-            SizedBox(
-              height: 50,
-              child: ListView(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                children: [
-                  _buildFilterChip('Nearest', Icons.near_me, true),
-                  _buildFilterChip('Highest Pay', Icons.payments, false),
-                  _buildFilterChip('Short Distance', Icons.straight, false),
-                  _buildFilterChip('Small Cargo', Icons.inventory_2, false),
-                ],
-              ),
-            ),
-
-            const SizedBox(height: 16),
-
-            // Job Cards
-            Expanded(
-              child: ListView(
-                padding: const EdgeInsets.symmetric(horizontal: 16),
-                children: [
-                  _buildJobCard(
-                    price: '\$24.00',
-                    distance: '4.2 km • 15 mins',
-                    pickup: '123 Main St, Downtown',
-                    dropoff: '450 Highland Ave, Suburb',
-                    badges: ['Small Parcel', 'Verified'],
-                  ),
-                  const SizedBox(height: 16),
-                  _buildJobCard(
-                    price: '\$8.50',
-                    distance: '1.1 km • 5 mins',
-                    pickup: 'Tech Park, Building B',
-                    dropoff: '88 Lowland Rd',
-                    badges: ['Urgent'],
-                    isUrgent: true,
-                  ),
-                  const SizedBox(height: 16),
-                  Center(
-                    child: Column(
-                      children: [
-                        Container(
-                          width: 24,
-                          height: 24,
-                          child: const CircularProgressIndicator(
-                            strokeWidth: 2,
-                            valueColor: AlwaysStoppedAnimation<Color>(
-                              Color(0xFF92A4C9),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 8),
-                        const Text(
-                          'Scanning for new jobs...',
-                          style: TextStyle(
-                            color: Color(0xFF92A4C9),
-                            fontSize: 14,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-      bottomNavigationBar: _buildBottomNav(),
-    );
-  }
-
-  Widget _buildFilterChip(String label, IconData icon, bool isActive) {
-    return Container(
-      margin: const EdgeInsets.only(right: 12),
-      height: 36,
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      decoration: BoxDecoration(
-        color: isActive ? const Color(0xFF135BEC) : const Color(0xFF1E293B),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(
-          color: isActive ? const Color(0xFF135BEC) : const Color(0xFF324467),
-        ),
-      ),
-      child: Row(
-        children: [
-          Icon(
-            icon,
-            size: 16,
-            color: isActive ? Colors.white : const Color(0xFF92A4C9),
-          ),
-          const SizedBox(width: 8),
-          Text(
-            label,
-            style: TextStyle(
-              fontSize: 14,
-              fontWeight: FontWeight.w500,
-              color: isActive ? Colors.white : const Color(0xFF92A4C9),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildJobCard({
-    required String price,
-    required String distance,
-    required String pickup,
-    required String dropoff,
-    required List<String> badges,
-    bool isUrgent = false,
-  }) {
-    return Container(
-      decoration: BoxDecoration(
-        color: const Color(0xFF192233),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: const Color(0xFF324467)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.2),
-            blurRadius: 20,
-          ),
-        ],
-      ),
-      child: Column(
-        children: [
-          // Map Header
-          Container(
-            height: 128,
-            decoration: const BoxDecoration(
-              color: Color(0xFF2A3A4F),
-              borderRadius: BorderRadius.only(
-                topLeft: Radius.circular(12),
-                topRight: Radius.circular(12),
-              ),
-            ),
-            child: Stack(
-              children: [
-                Positioned(
-                  top: 12,
-                  right: 12,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 6,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.white,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text(
-                      price,
-                      style: const TextStyle(
-                        fontSize: 18,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.black,
-                      ),
-                    ),
-                  ),
+      appBar: AppBar(
+        title: const Text('Available Jobs'),
+        centerTitle: true,
+        actions: [
+          // Online/Offline Toggle
+          Padding(
+            padding: const EdgeInsets.only(right: 16),
+            child: Center(
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: isOnline ? Colors.green : Colors.grey[700],
+                  borderRadius: BorderRadius.circular(20),
                 ),
-                Positioned(
-                  bottom: 12,
-                  left: 12,
-                  child: Container(
+                child: Row(
+                  children: [
+                    Container(
+                      width: 8,
+                      height: 8,
+                      decoration: const BoxDecoration(
+                        color: Colors.white,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      isOnline ? 'Online' : 'Offline',
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 12,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    GestureDetector(
+                      onTap: _toggleOnlineStatus,
+                      child: const Icon(
+                        Icons.swap_horiz,
+                        size: 16,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+      body: Column(
+        children: [
+          // Filter chips
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                _buildFilterChip('All Jobs', 'all'),
+                _buildFilterChip('Nearby', 'nearby'),
+                _buildFilterChip('High Pay', 'high_pay'),
+                _buildFilterChip('Urgent', 'urgent'),
+              ],
+            ),
+          ),
+
+          // Jobs list
+          Expanded(
+            child: availableJobsStream.when(
+              data: (jobs) {
+                if (jobs.isEmpty) {
+                  return Center(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(
+                          Icons.work_off,
+                          size: 64,
+                          color: Colors.grey[600],
+                        ),
+                        const SizedBox(height: 16),
+                        Text(
+                          isOnline
+                              ? 'No jobs available right now'
+                              : 'Go online to see available jobs',
+                          style: TextStyle(
+                            color: Colors.grey[600],
+                            fontSize: 16,
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }
+
+                return RefreshIndicator(
+                  onRefresh: () async {
+                    // Refresh handled by stream
+                    await Future.delayed(const Duration(milliseconds: 500));
+                  },
+                  child: ListView.builder(
+                    padding: const EdgeInsets.all(16),
+                    itemCount: jobs.length,
+                    itemBuilder: (context, index) {
+                      return _buildJobCard(jobs[index]);
+                    },
+                  ),
+                );
+              },
+              loading: () => const Center(child: CircularProgressIndicator()),
+              error: (error, stack) => Center(
+                child: Text('Error loading jobs: $error'),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildFilterChip(String label, String value) {
+    final isSelected = filterType == value;
+
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: FilterChip(
+        label: Text(label),
+        selected: isSelected,
+        onSelected: (selected) {
+          setState(() => filterType = value);
+        },
+        selectedColor: const Color(0xFF135BEC),
+        checkmarkColor: Colors.white,
+        labelStyle: TextStyle(
+          color: isSelected ? Colors.white : Colors.grey,
+          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildJobCard(OrderModel order) {
+    final distance = _calculateDistance(order); // Simplified
+    final earnings = order.price;
+
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      child: InkWell(
+        onTap: () {
+          Navigator.pushNamed(
+            context,
+            '/job-details',
+            arguments: order.id,
+          );
+        },
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Header
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 8,
                       vertical: 4,
                     ),
                     decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.6),
+                      color: Colors.green.withValues(alpha: 0.2),
                       borderRadius: BorderRadius.circular(4),
-                      border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.1),
+                    ),
+                    child: Text(
+                      '\$$earnings',
+                      style: const TextStyle(
+                        color: Colors.green,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
                       ),
                     ),
-                    child: Row(
+                  ),
+                  Text(
+                    '${distance.toStringAsFixed(1)} km',
+                    style: const TextStyle(
+                      color: Colors.grey,
+                      fontSize: 14,
+                    ),
+                  ),
+                ],
+              ),
+
+              const SizedBox(height: 16),
+
+              // Route
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Column(
+                    children: [
+                      const Icon(
+                        Icons.radio_button_checked,
+                        color: Color(0xFF135BEC),
+                        size: 16,
+                      ),
+                      Container(
+                        width: 2,
+                        height: 30,
+                        color: Colors.grey,
+                        margin: const EdgeInsets.symmetric(vertical: 4),
+                      ),
+                      const Icon(
+                        Icons.location_on,
+                        color: Colors.red,
+                        size: 16,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Icon(
-                          Icons.social_distance,
-                          color: Colors.white,
-                          size: 14,
-                        ),
-                        const SizedBox(width: 4),
                         Text(
-                          distance,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500,
-                          ),
+                          order.pickup.address,
+                          style: const TextStyle(fontSize: 14),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 24),
+                        Text(
+                          order.dropoff.address,
+                          style: const TextStyle(fontSize: 14),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
                         ),
                       ],
                     ),
                   ),
-                ),
-              ],
-            ),
-          ),
+                ],
+              ),
 
-          // Content
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Column(
-                      children: [
-                        Container(
-                          width: 12,
-                          height: 12,
-                          decoration: BoxDecoration(
-                            shape: BoxShape.circle,
-                            border: Border.all(
-                              color: const Color(0xFF135BEC),
-                              width: 3,
-                            ),
-                            color: const Color(0xFF192233),
-                          ),
-                        ),
-                        Container(
-                          width: 2,
-                          height: 40,
-                          margin: const EdgeInsets.symmetric(vertical: 4),
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.topCenter,
-                              end: Alignment.bottomCenter,
-                              colors: [
-                                const Color(0xFF135BEC).withValues(alpha: 0.5),
-                                const Color(0xFF92A4C9).withValues(alpha: 0.3),
-                              ],
-                            ),
-                          ),
-                        ),
-                        Container(
-                          width: 12,
-                          height: 12,
-                          decoration: BoxDecoration(
-                            border: Border.all(
-                              color: const Color(0xFF92A4C9),
-                              width: 3,
-                            ),
-                            color: const Color(0xFF192233),
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            'PICK-UP',
-                            style: TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.grey[500],
-                              letterSpacing: 0.8,
-                            ),
-                          ),
-                          Text(
-                            pickup,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 14,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-                          Text(
-                            'DROP-OFF',
-                            style: TextStyle(
-                              fontSize: 10,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.grey[500],
-                              letterSpacing: 0.8,
-                            ),
-                          ),
-                          Text(
-                            dropoff,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 14,
-                              fontWeight: FontWeight.w500,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                Divider(color: Colors.grey[800], height: 1),
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    ...badges.map((badge) => Container(
-                          margin: const EdgeInsets.only(right: 8),
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 4,
-                          ),
-                          decoration: BoxDecoration(
-                            color: isUrgent
-                                ? const Color(0xFFEF4444).withValues(alpha: 0.1)
-                                : const Color(0xFF232F48),
-                            borderRadius: BorderRadius.circular(4),
-                            border: isUrgent
-                                ? Border.all(
-                                    color: const Color(0xFFEF4444)
-                                        .withValues(alpha: 0.2),
-                                  )
-                                : null,
-                          ),
-                          child: Row(
-                            children: [
-                              if (isUrgent)
-                                const Icon(
-                                  Icons.bolt,
-                                  color: Color(0xFFEF4444),
-                                  size: 14,
-                                ),
-                              if (!isUrgent)
-                                const Icon(
-                                  Icons.inventory_2,
-                                  color: Color(0xFF92A4C9),
-                                  size: 14,
-                                ),
-                              const SizedBox(width: 4),
-                              Text(
-                                badge,
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w500,
-                                  color: isUrgent
-                                      ? const Color(0xFFEF4444)
-                                      : const Color(0xFF92A4C9),
-                                ),
-                              ),
-                            ],
-                          ),
-                        )),
-                    const Spacer(),
-                    Container(
-                      height: 40,
-                      padding: const EdgeInsets.symmetric(horizontal: 16),
-                      child: ElevatedButton(
-                        onPressed: () {},
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFF135BEC),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          padding: const EdgeInsets.symmetric(horizontal: 16),
-                        ),
-                        child: const Row(
-                          children: [
-                            Text('Accept'),
-                            SizedBox(width: 8),
-                            Icon(Icons.arrow_forward, size: 16),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
+              const SizedBox(height: 16),
 
-  Widget _buildBottomNav() {
-    return Container(
-      decoration: BoxDecoration(
-        color: const Color(0xFF192233).withValues(alpha: 0.9),
-        border: const Border(
-          top: BorderSide(color: Color(0xFF324467)),
-        ),
-      ),
-      child: SafeArea(
-        child: SizedBox(
-          height: 70,
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceAround,
-            children: [
-              _buildNavItem(Icons.work, 'Jobs', true),
-              _buildNavItem(Icons.local_shipping, 'Active', false, badge: '1'),
-              _buildNavItem(Icons.account_balance_wallet, 'Wallet', false),
-              _buildNavItem(Icons.settings, 'Settings', false),
+              // Footer
+              Row(
+                children: [
+                  Icon(
+                    Icons.inventory_2,
+                    size: 16,
+                    color: Colors.grey[600],
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    order.parcelDescription,
+                    style: TextStyle(
+                      color: Colors.grey[600],
+                      fontSize: 12,
+                    ),
+                  ),
+                  const Spacer(),
+                  Icon(
+                    Icons.access_time,
+                    size: 16,
+                    color: Colors.grey[600],
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    _getTimeAgo(order.createdAt),
+                    style: TextStyle(
+                      color: Colors.grey[600],
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
             ],
           ),
         ),
@@ -553,55 +327,17 @@ class AvailableJobsScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildNavItem(IconData icon, String label, bool isActive,
-      {String? badge}) {
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      children: [
-        Stack(
-          clipBehavior: Clip.none,
-          children: [
-            Icon(
-              icon,
-              color:
-                  isActive ? const Color(0xFF135BEC) : const Color(0xFF92A4C9),
-              size: 24,
-            ),
-            if (badge != null)
-              Positioned(
-                top: -4,
-                right: -4,
-                child: Container(
-                  width: 16,
-                  height: 16,
-                  decoration: const BoxDecoration(
-                    color: Color(0xFF135BEC),
-                    shape: BoxShape.circle,
-                  ),
-                  child: Center(
-                    child: Text(
-                      badge,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-          ],
-        ),
-        const SizedBox(height: 4),
-        Text(
-          label,
-          style: TextStyle(
-            fontSize: 10,
-            fontWeight: FontWeight.w500,
-            color: isActive ? const Color(0xFF135BEC) : const Color(0xFF92A4C9),
-          ),
-        ),
-      ],
-    );
+  double _calculateDistance(OrderModel order) {
+    // Simplified distance calculation
+    // In production, use geolocator distance calculation
+    return 2.5;
+  }
+
+  String _getTimeAgo(DateTime time) {
+    final diff = DateTime.now().difference(time);
+    if (diff.inMinutes < 1) return 'Just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+    if (diff.inHours < 24) return '${diff.inHours}h ago';
+    return '${diff.inDays}d ago';
   }
 }
