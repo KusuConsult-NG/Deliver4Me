@@ -214,6 +214,14 @@ class OrderModel {
     DateTime? createdAt,
     DateTime? acceptedAt,
     DateTime? deliveredAt,
+    DateTime? pickedUpAt,
+    String? recipientName,
+    String? recipientPhone,
+    String? notes,
+    String? riderName,
+    String? riderPhone,
+    Map<String, dynamic>? riderLocation,
+    DateTime? estimatedArrival,
   }) {
     return OrderModel(
       id: id ?? this.id,
@@ -232,6 +240,14 @@ class OrderModel {
       createdAt: createdAt ?? this.createdAt,
       acceptedAt: acceptedAt ?? this.acceptedAt,
       deliveredAt: deliveredAt ?? this.deliveredAt,
+      pickedUpAt: pickedUpAt ?? this.pickedUpAt,
+      recipientName: recipientName ?? this.recipientName,
+      recipientPhone: recipientPhone ?? this.recipientPhone,
+      notes: notes ?? this.notes,
+      riderName: riderName ?? this.riderName,
+      riderPhone: riderPhone ?? this.riderPhone,
+      riderLocation: riderLocation ?? this.riderLocation,
+      estimatedArrival: estimatedArrival ?? this.estimatedArrival,
     );
   }
 }

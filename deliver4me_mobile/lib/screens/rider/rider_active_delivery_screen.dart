@@ -34,7 +34,7 @@ class _RiderActiveDeliveryScreenState
     super.dispose();
   }
 
-  Future<void> _updateStatus(OrderModel order, String newStatus) async {
+  Future<void> _updateStatus(OrderModel order, OrderStatus newStatus) async {
     setState(() => isLoading = true);
 
     try {
@@ -83,7 +83,8 @@ class _RiderActiveDeliveryScreenState
       if (user == null) throw Exception('No user logged in');
 
       // Update order status to delivered
-      await orderService.updateOrderStatus(widget.orderId, 'delivered');
+      await orderService.updateOrderStatus(
+          widget.orderId, OrderStatus.delivered);
 
       // Add earnings to rider wallet
       await userService.updateWalletBalance(user.uid, order.price);
@@ -283,30 +284,30 @@ class _RiderActiveDeliveryScreenState
     );
   }
 
-  Widget _buildStatusBanner(String status) {
+  Widget _buildStatusBanner(OrderStatus status) {
     Color color;
     String text;
     IconData icon;
 
     switch (status) {
-      case 'accepted':
-        color = Color(0xFF135BEC);
+      case OrderStatus.accepted:
+        color = const Color(0xFF135BEC);
         text = 'Head to Pickup Location';
         icon = Icons.directions;
         break;
-      case 'picked_up':
+      case OrderStatus.pickedUp:
         color = Colors.orange;
         text = 'Deliver to Customer';
         icon = Icons.local_shipping;
         break;
-      case 'delivered':
+      case OrderStatus.delivered:
         color = Colors.green;
         text = 'Delivery Complete!';
         icon = Icons.check_circle;
         break;
       default:
         color = Colors.grey;
-        text = status;
+        text = status.toString().split('.').last;
         icon = Icons.info;
     }
 
@@ -385,16 +386,17 @@ class _RiderActiveDeliveryScreenState
   }
 
   Widget _buildActionButton(OrderModel order) {
-    if (order.status == 'accepted') {
+    if (order.status == OrderStatus.accepted) {
       return ElevatedButton(
-        onPressed: isLoading ? null : () => _updateStatus(order, 'picked_up'),
+        onPressed:
+            isLoading ? null : () => _updateStatus(order, OrderStatus.pickedUp),
         style: ElevatedButton.styleFrom(
-          backgroundColor: Color(0xFF135BEC),
+          backgroundColor: const Color(0xFF135BEC),
           padding: const EdgeInsets.symmetric(vertical: 16),
         ),
         child: const Text('Mark as Picked Up'),
       );
-    } else if (order.status == 'picked_up') {
+    } else if (order.status == OrderStatus.pickedUp) {
       return ElevatedButton(
         onPressed: isLoading ? null : () => _completeDelivery(order),
         style: ElevatedButton.styleFrom(
@@ -403,7 +405,7 @@ class _RiderActiveDeliveryScreenState
         ),
         child: const Text('Complete Delivery'),
       );
-    } else if (order.status == 'delivered') {
+    } else if (order.status == OrderStatus.delivered) {
       return ElevatedButton(
         onPressed: () => Navigator.pop(context),
         style: ElevatedButton.styleFrom(

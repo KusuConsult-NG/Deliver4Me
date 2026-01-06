@@ -1,6 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:deliver4me_mobile/services/order_service.dart';
-import 'package:deliver4me_mobile/models/order_model.dart';
 import 'package:deliver4me_mobile/screens/sender/parcel_tracker_screen.dart';
 
 class PaymentConfirmationScreen extends StatelessWidget {

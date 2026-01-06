@@ -275,7 +275,7 @@ class _JobDetailsScreenState extends ConsumerState<JobDetailsScreen> {
                   Expanded(
                     flex: 2,
                     child: ElevatedButton(
-                      onPressed: isLoading ? null : () => _acceptJob(order!),
+                      onPressed: isLoading ? null : () => _acceptJob(order),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.green,
                         padding: const EdgeInsets.symmetric(vertical: 16),

@@ -4,6 +4,7 @@ import 'package:deliver4me_mobile/providers/auth_provider.dart';
 import 'package:deliver4me_mobile/services/payment_service.dart';
 import 'package:deliver4me_mobile/services/user_service.dart';
 import 'package:deliver4me_mobile/services/order_service.dart';
+import 'package:deliver4me_mobile/models/order_model.dart';
 import 'package:deliver4me_mobile/config/firebase_config.dart';
 import 'package:deliver4me_mobile/screens/sender/payment_confirmation_screen.dart';
 import 'package:uuid/uuid.dart';
@@ -96,7 +97,7 @@ class _SelectPaymentMethodScreenState
     await userService.updateWalletBalance(userId, -widget.amount);
 
     // Update order status
-    await orderService.updateOrderStatus(widget.orderId, 'confirmed');
+    await orderService.updateOrderStatus(widget.orderId, OrderStatus.pending);
 
     if (mounted) {
       Navigator.pushReplacement(
@@ -136,7 +137,8 @@ class _SelectPaymentMethodScreenState
 
       if (verifiedResult['status'] == 'success') {
         // Update order status
-        await orderService.updateOrderStatus(widget.orderId, 'confirmed');
+        await orderService.updateOrderStatus(
+            widget.orderId, OrderStatus.pending);
 
         if (mounted) {
           Navigator.pushReplacement(

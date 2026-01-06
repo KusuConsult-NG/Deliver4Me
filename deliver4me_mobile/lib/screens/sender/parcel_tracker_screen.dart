@@ -141,25 +141,25 @@ class ParcelTrackerScreen extends ConsumerWidget {
     String statusText;
 
     switch (order.status) {
-      case 'pending':
+      case OrderStatus.pending:
         statusColor = Colors.orange;
         statusText = 'Finding Rider...';
         break;
-      case 'accepted':
-        statusColor = Color(0xFF135BEC);
+      case OrderStatus.accepted:
+        statusColor = const Color(0xFF135BEC);
         statusText = 'Rider Assigned';
         break;
-      case 'picked_up':
+      case OrderStatus.pickedUp:
         statusColor = Colors.green;
         statusText = 'In Transit';
         break;
-      case 'delivered':
+      case OrderStatus.delivered:
         statusColor = Colors.green;
         statusText = 'Delivered';
         break;
       default:
         statusColor = Colors.grey;
-        statusText = order.status.toUpperCase();
+        statusText = order.status.toString().split('.').last.toUpperCase();
     }
 
     return Container(
@@ -327,7 +327,8 @@ class ParcelTrackerScreen extends ConsumerWidget {
                 const SizedBox(height: 16),
 
                 // Delivery code (if in transit)
-                if (order.status == 'picked_up' || order.status == 'accepted')
+                if (order.status == OrderStatus.pickedUp ||
+                    order.status == OrderStatus.accepted)
                   Container(
                     padding: const EdgeInsets.all(16),
                     decoration: BoxDecoration(

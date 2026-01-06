@@ -124,7 +124,7 @@ class _CreateDeliveryScreenState extends ConsumerState<CreateDeliveryScreen> {
         recipientName: _recipientNameController.text.trim(),
         recipientPhone: _recipientPhoneController.text.trim(),
         weightCategory: selectedWeight,
-        estimatedPrice: estimatedPrice,
+        paymentMethod: 'pending', // Will be updated after payment
         notes: _notesController.text.trim(),
       );
 

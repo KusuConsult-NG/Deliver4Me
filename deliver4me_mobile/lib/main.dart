@@ -104,21 +104,29 @@ class ScreenSelector extends StatelessWidget {
               context, '7. Create Delivery', const CreateDeliveryScreen()),
           _buildScreenButton(context, '8. Geolocation Selection 🗺️',
               const GeolocationSelectionScreen()),
+          _buildScreenButton(context, '9. Parcel Tracker 🗺️',
+              const ParcelTrackerScreen(orderId: 'demo-order-123')),
           _buildScreenButton(
-              context, '9. Parcel Tracker 🗺️', const ParcelTrackerScreen()),
-          _buildScreenButton(context, '10. Select Payment Method',
-              const SelectPaymentMethodScreen()),
+              context,
+              '10. Select Payment Method',
+              const SelectPaymentMethodScreen(
+                  orderId: 'demo-order-123', amount: 25.0)),
           _buildScreenButton(
               context, '11. Add New Card', const AddNewCardScreen()),
-          _buildScreenButton(context, '12. Payment Confirmation',
-              const PaymentConfirmationScreen()),
+          _buildScreenButton(
+              context,
+              '12. Payment Confirmation',
+              const PaymentConfirmationScreen(
+                  orderId: 'demo-order-123',
+                  amount: 25.0,
+                  paymentMethod: 'Card')),
 
           const SizedBox(height: 24),
           const _SectionHeader(title: 'Rider Screens (4 screens)'),
           _buildScreenButton(
               context, '13. Available Jobs', const AvailableJobsScreen()),
-          _buildScreenButton(
-              context, '14. Job Details 🗺️', const JobDetailsScreen()),
+          _buildScreenButton(context, '14. Job Details 🗺️',
+              const JobDetailsScreen(orderId: 'demo-order-123')),
           _buildScreenButton(
               context, '15. Rider Wallet', const RiderWalletScreen()),
           _buildScreenButton(
