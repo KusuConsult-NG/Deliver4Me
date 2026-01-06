@@ -1,15 +1,162 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:deliver4me_mobile/providers/auth_provider.dart';
+import 'package:deliver4me_mobile/services/payment_service.dart';
+import 'package:deliver4me_mobile/services/user_service.dart';
+import 'package:deliver4me_mobile/services/order_service.dart';
+import 'package:deliver4me_mobile/config/firebase_config.dart';
+import 'package:deliver4me_mobile/screens/sender/payment_confirmation_screen.dart';
+import 'package:uuid/uuid.dart';
 
-class SelectPaymentMethodScreen extends StatefulWidget {
-  const SelectPaymentMethodScreen({super.key});
+class SelectPaymentMethodScreen extends ConsumerStatefulWidget {
+  final String orderId;
+  final double amount;
+
+  const SelectPaymentMethodScreen({
+    super.key,
+    required this.orderId,
+    required this.amount,
+  });
 
   @override
-  State<SelectPaymentMethodScreen> createState() =>
+  ConsumerState<SelectPaymentMethodScreen> createState() =>
       _SelectPaymentMethodScreenState();
 }
 
-class _SelectPaymentMethodScreenState extends State<SelectPaymentMethodScreen> {
-  String selectedMethod = 'wallet';
+class _SelectPaymentMethodScreenState
+    extends ConsumerState<SelectPaymentMethodScreen> {
+  final paymentService = PaymentService(FirebaseConfig.paystackPublicKey);
+  final userService = UserService();
+  final orderService = OrderService();
+
+  String selectedMethod = 'card';
+  bool isLoading = false;
+  double walletBalance = 0.0;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadWalletBalance();
+  }
+
+  Future<void> _loadWalletBalance() async {
+    try {
+      final authState = ref.read(authStateProvider);
+      final user = authState.value;
+
+      if (user != null) {
+        final userData = await userService.getUserById(user.uid);
+        if (userData != null && mounted) {
+          setState(() {
+            walletBalance = userData.walletBalance;
+          });
+        }
+      }
+    } catch (e) {
+      print('Error loading wallet balance: $e');
+    }
+  }
+
+  Future<void> _processPayment() async {
+    setState(() => isLoading = true);
+
+    try {
+      final authState = ref.read(authStateProvider);
+      final user = authState.value;
+
+      if (user == null) {
+        throw Exception('No user logged in');
+      }
+
+      if (selectedMethod == 'wallet') {
+        await _processWalletPayment(user.uid);
+      } else {
+        await _processCardPayment(user.uid);
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Payment failed: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => isLoading = false);
+    }
+  }
+
+  Future<void> _processWalletPayment(String userId) async {
+    if (walletBalance < widget.amount) {
+      throw Exception('Insufficient wallet balance');
+    }
+
+    // Deduct from wallet
+    await userService.updateWalletBalance(userId, -widget.amount);
+
+    // Update order status
+    await orderService.updateOrderStatus(widget.orderId, 'confirmed');
+
+    if (mounted) {
+      Navigator.pushReplacement(
+        context,
+        MaterialPageRoute(
+          builder: (context) => PaymentConfirmationScreen(
+            orderId: widget.orderId,
+            amount: widget.amount,
+            paymentMethod: 'Wallet',
+          ),
+        ),
+      );
+    }
+  }
+
+  Future<void> _processCardPayment(String userId) async {
+    final reference = 'ORDER_${const Uuid().v4()}';
+
+    try {
+      // Initialize Paystack transaction
+      final result = await paymentService.initializeTransaction(
+        email: ref.read(authStateProvider).value?.email ?? '',
+        amount: widget.amount,
+        reference: reference,
+      );
+
+      // In a real app, you would open the authorization_url in a webview
+      // For demo purposes, we'll simulate a successful payment
+      final authUrl = result['authorization_url'];
+
+      // TODO: Open webview with authUrl
+      // For now, simulate payment after delay
+      await Future.delayed(const Duration(seconds: 1));
+
+      // Verify payment (in real app, this would be after webview returns)
+      final verifiedResult = await paymentService.verifyTransaction(reference);
+
+      if (verifiedResult['status'] == 'success') {
+        // Update order status
+        await orderService.updateOrderStatus(widget.orderId, 'confirmed');
+
+        if (mounted) {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(
+              builder: (context) => PaymentConfirmationScreen(
+                orderId: widget.orderId,
+                amount: widget.amount,
+                paymentMethod: 'Card',
+              ),
+            ),
+          );
+        }
+      } else {
+        throw Exception('Payment verification failed');
+      }
+    } catch (e) {
+      throw Exception('Card payment failed: $e');
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -21,221 +168,104 @@ class _SelectPaymentMethodScreenState extends State<SelectPaymentMethodScreen> {
         ),
         title: const Text('Payment Method'),
         centerTitle: true,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.more_vert),
-            onPressed: () {},
-          ),
-        ],
       ),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // Wallet Balance Card
-            Container(
-              padding: const EdgeInsets.all(20),
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  colors: [
-                    const Color(0xFF135BEC).withValues(alpha: 0.9),
-                    const Color(0xFF0A3489),
-                  ],
-                ),
-                borderRadius: BorderRadius.circular(12),
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.1),
-                    blurRadius: 20,
-                    offset: const Offset(0, 8),
+      body: Stack(
+        children: [
+          SingleChildScrollView(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Order Summary
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    gradient: const LinearGradient(
+                      colors: [Color(0xFF135BEC), Color(0xFF0A3489)],
+                    ),
+                    borderRadius: BorderRadius.circular(12),
                   ),
-                ],
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Row(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(
-                        Icons.account_balance_wallet,
-                        color: Colors.white70,
-                        size: 20,
-                      ),
-                      SizedBox(width: 8),
-                      Text(
-                        'Deliver4Me Wallet',
+                      const Text(
+                        'Order Total',
                         style: TextStyle(
                           color: Colors.white70,
                           fontSize: 14,
-                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        '\$${widget.amount.toStringAsFixed(2)}',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 32,
+                          fontWeight: FontWeight.bold,
                         ),
                       ),
                     ],
                   ),
-                  const SizedBox(height: 12),
-                  const Text(
-                    '\$124.50',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 30,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 4,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.2),
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        child: const Text(
-                          '+\$45.00 Pending',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 12,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ),
-                      TextButton(
-                        onPressed: () {},
-                        style: TextButton.styleFrom(
-                          backgroundColor:
-                              const Color(0xFF135BEC).withValues(alpha: 0.2),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 16, vertical: 8),
-                        ),
-                        child: const Text(
-                          'Top Up',
-                          style: TextStyle(
-                            color: Color(0xFF135BEC),
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 12),
-                  const Text(
-                    'Use your wallet for instant payments and earn 2% cashback.',
-                    style: TextStyle(
-                      color: Colors.white70,
-                      fontSize: 12,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-
-            const SizedBox(height: 24),
-
-            const Text(
-              'PAYMENT OPTIONS',
-              style: TextStyle(
-                fontSize: 12,
-                fontWeight: FontWeight.bold,
-                color: Colors.grey,
-                letterSpacing: 1.2,
-              ),
-            ),
-            const SizedBox(height: 16),
-
-            // Payment Options
-            _buildPaymentOption(
-              'wallet',
-              Icons.account_balance_wallet,
-              'Deliver4Me Wallet',
-              'Balance: \$124.50',
-            ),
-            _buildPaymentOption(
-              'visa',
-              Icons.credit_card,
-              'Visa ending in 4242',
-              'Expires 12/25',
-            ),
-            _buildPaymentOption(
-              'mastercard',
-              Icons.credit_card,
-              'Mastercard ending in 8839',
-              'Expires 09/24',
-            ),
-            _buildPaymentOption(
-              'ussd',
-              Icons.dialpad,
-              'USSD / Mobile Money',
-              'Pay via *123#',
-            ),
-
-            const SizedBox(height: 16),
-
-            // Add New Method
-            InkWell(
-              onTap: () {},
-              child: Container(
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(
-                  border: Border.all(
-                    color: Colors.grey[300]!,
-                    style: BorderStyle.solid,
-                    width: 2,
-                  ),
-                  borderRadius: BorderRadius.circular(12),
-                  color: Colors.grey[50],
                 ),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 40,
-                      height: 40,
-                      decoration: BoxDecoration(
-                        color: Colors.grey[200],
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(
-                        Icons.add_card,
-                        color: Colors.grey,
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    const Text(
-                      'Add New Card',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                    const Spacer(),
-                    const Icon(Icons.chevron_right, color: Colors.grey),
-                  ],
-                ),
-              ),
-            ),
 
-            const SizedBox(height: 24),
+                const SizedBox(height: 24),
 
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(Icons.lock, color: Colors.green, size: 16),
-                const SizedBox(width: 8),
-                Text(
-                  'Payments are secure and encrypted',
+                const Text(
+                  'SELECT PAYMENT METHOD',
                   style: TextStyle(
                     fontSize: 12,
-                    color: Colors.grey[600],
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 1.2,
                   ),
+                ),
+                const SizedBox(height: 16),
+
+                // Wallet Option
+                _buildPaymentOption(
+                  'wallet',
+                  Icons.account_balance_wallet,
+                  'Deliver4Me Wallet',
+                  'Balance: \$${walletBalance.toStringAsFixed(2)}',
+                  walletBalance >= widget.amount,
+                ),
+
+                // Card Option
+                _buildPaymentOption(
+                  'card',
+                  Icons.credit_card,
+                  'Credit/Debit Card',
+                  'Pay with Paystack',
+                  true,
+                ),
+
+                const SizedBox(height: 24),
+
+                // Security Badge
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    const Icon(Icons.lock, color: Colors.green, size: 16),
+                    const SizedBox(width: 8),
+                    Text(
+                      'Payments are secure and encrypted',
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey[600],
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
-          ],
-        ),
+          ),
+          if (isLoading)
+            Container(
+              color: Colors.black54,
+              child: const Center(
+                child: CircularProgressIndicator(),
+              ),
+            ),
+        ],
       ),
       bottomNavigationBar: SafeArea(
         child: Padding(
@@ -253,9 +283,9 @@ class _SelectPaymentMethodScreenState extends State<SelectPaymentMethodScreen> {
                       color: Colors.grey[600],
                     ),
                   ),
-                  const Text(
-                    '\$15.00',
-                    style: TextStyle(
+                  Text(
+                    '\$${widget.amount.toStringAsFixed(2)}',
+                    style: const TextStyle(
                       fontSize: 20,
                       fontWeight: FontWeight.bold,
                     ),
@@ -267,13 +297,7 @@ class _SelectPaymentMethodScreenState extends State<SelectPaymentMethodScreen> {
                 width: double.infinity,
                 height: 50,
                 child: ElevatedButton(
-                  onPressed: () {},
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF135BEC),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                  ),
+                  onPressed: isLoading ? null : _processPayment,
                   child: const Text('Confirm Payment'),
                 ),
               ),
@@ -289,73 +313,73 @@ class _SelectPaymentMethodScreenState extends State<SelectPaymentMethodScreen> {
     IconData icon,
     String title,
     String subtitle,
+    bool isEnabled,
   ) {
     final isSelected = selectedMethod == value;
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      child: InkWell(
-        onTap: () => setState(() => selectedMethod = value),
-        borderRadius: BorderRadius.circular(12),
-        child: Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: isSelected ? const Color(0xFF135BEC) : Colors.grey[300]!,
-              width: isSelected ? 2 : 1,
+    return Opacity(
+      opacity: isEnabled ? 1.0 : 0.5,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        child: InkWell(
+          onTap:
+              isEnabled ? () => setState(() => selectedMethod = value) : null,
+          borderRadius: BorderRadius.circular(12),
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: Colors.grey[850],
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color:
+                    isSelected ? const Color(0xFF135BEC) : Colors.transparent,
+                width: 2,
+              ),
             ),
-            boxShadow: [
-              if (isSelected)
-                BoxShadow(
-                  color: const Color(0xFF135BEC).withValues(alpha: 0.1),
-                  blurRadius: 8,
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color:
+                        isSelected ? const Color(0xFF135BEC) : Colors.grey[800],
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(
+                    icon,
+                    color: Colors.white,
+                    size: 20,
+                  ),
                 ),
-            ],
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: Colors.grey[100],
-                  shape: BoxShape.circle,
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: const TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        subtitle,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Colors.grey[600],
+                        ),
+                      ),
+                    ],
+                  ),
                 ),
-                child: Icon(
-                  icon,
+                Icon(
+                  isSelected ? Icons.check_circle : Icons.circle_outlined,
                   color: isSelected ? const Color(0xFF135BEC) : Colors.grey,
                 ),
-              ),
-              const SizedBox(width: 16),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      title,
-                      style: const TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      subtitle,
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Colors.grey[600],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              Icon(
-                isSelected ? Icons.check_circle : Icons.circle_outlined,
-                color: isSelected ? const Color(0xFF135BEC) : Colors.grey,
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
