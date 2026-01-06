@@ -39,7 +39,7 @@ class PaymentService {
   }
 
   // Verify transaction
-  Future<bool> verifyTransaction(String reference) async {
+  Future<Map<String, dynamic>> verifyTransaction(String reference) async {
     try {
       final response = await http.get(
         Uri.parse('$_baseUrl/transaction/verify/$reference'),
@@ -50,11 +50,14 @@ class PaymentService {
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        return data['data']['status'] == 'success';
+        return {
+          'status': data['data']['status'] == 'success' ? 'success' : 'failed',
+          'data': data['data']
+        };
       }
-      return false;
+      return {'status': 'failed', 'message': 'Verification request failed'};
     } catch (e) {
-      return false;
+      return {'status': 'failed', 'message': e.toString()};
     }
   }
 
