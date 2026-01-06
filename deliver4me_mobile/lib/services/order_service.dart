@@ -15,6 +15,9 @@ class OrderService {
     required String parcelDescription,
     required String weightCategory,
     required String paymentMethod,
+    required String recipientName,
+    required String recipientPhone,
+    String notes = '',
   }) async {
     try {
       final orderId = _uuid.v4();
@@ -32,6 +35,9 @@ class OrderService {
         price: price,
         paymentMethod: paymentMethod,
         deliveryCode: deliveryCode,
+        recipientName: recipientName,
+        recipientPhone: recipientPhone,
+        notes: notes,
         timeline: [
           TimelineEvent(
             title: 'Order Created',

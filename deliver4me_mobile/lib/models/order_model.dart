@@ -89,6 +89,14 @@ class OrderModel {
   final DateTime createdAt;
   final DateTime? acceptedAt;
   final DateTime? deliveredAt;
+  final DateTime? pickedUpAt;
+  final String recipientName;
+  final String recipientPhone;
+  final String notes;
+  final String? riderName;
+  final String? riderPhone;
+  final Map<String, dynamic>? riderLocation;
+  final DateTime? estimatedArrival;
 
   OrderModel({
     required this.id,
@@ -107,6 +115,14 @@ class OrderModel {
     required this.createdAt,
     this.acceptedAt,
     this.deliveredAt,
+    this.pickedUpAt,
+    required this.recipientName,
+    required this.recipientPhone,
+    this.notes = '',
+    this.riderName,
+    this.riderPhone,
+    this.riderLocation,
+    this.estimatedArrival,
   });
 
   factory OrderModel.fromFirestore(DocumentSnapshot doc) {
@@ -137,6 +153,18 @@ class OrderModel {
       deliveredAt: data['deliveredAt'] != null
           ? (data['deliveredAt'] as Timestamp).toDate()
           : null,
+      pickedUpAt: data['pickedUpAt'] != null
+          ? (data['pickedUpAt'] as Timestamp).toDate()
+          : null,
+      recipientName: data['recipientName'] ?? '',
+      recipientPhone: data['recipientPhone'] ?? '',
+      notes: data['notes'] ?? '',
+      riderName: data['riderName'],
+      riderPhone: data['riderPhone'],
+      riderLocation: data['riderLocation'] as Map<String, dynamic>?,
+      estimatedArrival: data['estimatedArrival'] != null
+          ? (data['estimatedArrival'] as Timestamp).toDate()
+          : null,
     );
   }
 
@@ -157,6 +185,15 @@ class OrderModel {
       'createdAt': Timestamp.fromDate(createdAt),
       if (acceptedAt != null) 'acceptedAt': Timestamp.fromDate(acceptedAt!),
       if (deliveredAt != null) 'deliveredAt': Timestamp.fromDate(deliveredAt!),
+      if (pickedUpAt != null) 'pickedUpAt': Timestamp.fromDate(pickedUpAt!),
+      'recipientName': recipientName,
+      'recipientPhone': recipientPhone,
+      'notes': notes,
+      if (riderName != null) 'riderName': riderName,
+      if (riderPhone != null) 'riderPhone': riderPhone,
+      if (riderLocation != null) 'riderLocation': riderLocation,
+      if (estimatedArrival != null)
+        'estimatedArrival': Timestamp.fromDate(estimatedArrival!),
     };
   }
 
