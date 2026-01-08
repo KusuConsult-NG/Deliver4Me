@@ -4,6 +4,11 @@ import 'package:deliver4me_mobile/providers/auth_provider.dart';
 import 'package:deliver4me_mobile/providers/order_provider.dart';
 import 'package:deliver4me_mobile/models/order_model.dart';
 import 'package:deliver4me_mobile/services/user_service.dart';
+import 'package:deliver4me_mobile/screens/rider/rider_preferences_screen.dart';
+import 'package:geolocator/geolocator.dart';
+import 'package:deliver4me_mobile/screens/profile_screen.dart';
+import 'package:deliver4me_mobile/screens/common/identity_verification_screen.dart';
+import 'package:deliver4me_mobile/screens/rider/job_offer_modal.dart';
 
 class AvailableJobsScreen extends ConsumerStatefulWidget {
   const AvailableJobsScreen({super.key});
@@ -17,12 +22,46 @@ class _AvailableJobsScreenState extends ConsumerState<AvailableJobsScreen> {
   final userService = UserService();
   bool isOnline = true;
   String filterType = 'all';
+  Position? currentPosition;
+
+  @override
+  void initState() {
+    super.initState();
+    _getCurrentLocation();
+  }
+
+  Future<void> _getCurrentLocation() async {
+    try {
+      final position = await Geolocator.getCurrentPosition();
+      if (mounted) {
+        setState(() {
+          currentPosition = position;
+        });
+      }
+    } catch (e) {
+      debugPrint('Error getting location: $e');
+    }
+  }
 
   Future<void> _toggleOnlineStatus() async {
     final authState = ref.read(authStateProvider);
     final user = authState.value;
 
     if (user != null) {
+      // Fetch full user model to check KYC status
+      final userModel = await userService.getUserById(user.uid);
+
+      if (userModel != null && !isOnline && userModel.kycStatus != 'verified') {
+        // Enforce KYC check before going online
+        if (!mounted) return;
+        final verified = await Navigator.push(
+          context,
+          MaterialPageRoute(builder: (_) => const IdentityVerificationScreen()),
+        );
+
+        if (verified != true) return; // User cancelled or failed
+      }
+
       setState(() => isOnline = !isOnline);
 
       await userService.updateRiderStatus(user.uid, isOnline);
@@ -41,13 +80,38 @@ class _AvailableJobsScreenState extends ConsumerState<AvailableJobsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Get current user for preferences
     final availableJobsStream = ref.watch(availableJobsProvider);
+    final userAsync = ref.watch(currentUserProvider);
+    final user = userAsync.value;
 
     return Scaffold(
       appBar: AppBar(
         title: const Text('Available Jobs'),
         centerTitle: true,
         actions: [
+          IconButton(
+            icon: const Icon(Icons.person),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const ProfileScreen(),
+                ),
+              );
+            },
+          ),
+          IconButton(
+            icon: const Icon(Icons.tune),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => const RiderPreferencesScreen(),
+                ),
+              );
+            },
+          ),
           // Online/Offline Toggle
           Padding(
             padding: const EdgeInsets.only(right: 16),
@@ -146,9 +210,48 @@ class _AvailableJobsScreenState extends ConsumerState<AvailableJobsScreen> {
                   },
                   child: ListView.builder(
                     padding: const EdgeInsets.all(16),
-                    itemCount: jobs.length,
+                    itemCount: jobs.where((job) {
+                      final distance = _calculateDistance(job);
+                      if (user?.deliveryRadius != null &&
+                          distance > user!.deliveryRadius!) {
+                        return false;
+                      }
+
+                      if (filterType == 'nearby') {
+                        return distance <= 5.0;
+                      } else if (filterType == 'high_pay') {
+                        return job.price >= 30.0;
+                      } else if (filterType == 'urgent') {
+                        return job.isUrgent ||
+                            job.isASAP ||
+                            DateTime.now().difference(job.createdAt).inMinutes <
+                                30;
+                      }
+                      return true;
+                    }).length,
                     itemBuilder: (context, index) {
-                      return _buildJobCard(jobs[index]);
+                      final filteredJobs = jobs.where((job) {
+                        final distance = _calculateDistance(job);
+                        if (user?.deliveryRadius != null &&
+                            distance > user!.deliveryRadius!) {
+                          return false; // Skip jobs outside preferred radius
+                        }
+
+                        if (filterType == 'nearby') {
+                          return distance <= 5.0;
+                        } else if (filterType == 'high_pay') {
+                          return job.price >= 30.0;
+                        } else if (filterType == 'urgent') {
+                          return job.isUrgent ||
+                              job.isASAP ||
+                              DateTime.now()
+                                      .difference(job.createdAt)
+                                      .inMinutes <
+                                  30;
+                        }
+                        return true;
+                      }).toList();
+                      return _buildJobCard(filteredJobs[index]);
                     },
                   ),
                 );
@@ -193,10 +296,11 @@ class _AvailableJobsScreenState extends ConsumerState<AvailableJobsScreen> {
       margin: const EdgeInsets.only(bottom: 12),
       child: InkWell(
         onTap: () {
-          Navigator.pushNamed(
-            context,
-            '/job-details',
-            arguments: order.id,
+          showModalBottomSheet(
+            context: context,
+            backgroundColor: Colors.transparent,
+            isScrollControlled: true,
+            builder: (context) => JobOfferModal(order: order),
           );
         },
         child: Padding(
@@ -208,30 +312,71 @@ class _AvailableJobsScreenState extends ConsumerState<AvailableJobsScreen> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.green.withValues(alpha: 0.2),
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Text(
-                      '\$$earnings',
-                      style: const TextStyle(
-                        color: Colors.green,
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
+                  Row(
+                    children: [
+                      if (order.isUrgent)
+                        Container(
+                          margin: const EdgeInsets.only(right: 8),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                              color: Colors.red,
+                              borderRadius: BorderRadius.circular(4)),
+                          child: const Row(
+                            children: [
+                              Icon(Icons.flash_on,
+                                  color: Colors.white, size: 12),
+                              SizedBox(width: 4),
+                              Text('URGENT',
+                                  style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold)),
+                            ],
+                          ),
+                        ),
+                      if (order.isASAP)
+                        Container(
+                          margin: const EdgeInsets.only(right: 8),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 4),
+                          decoration: BoxDecoration(
+                              color: const Color(0xFF135BEC),
+                              borderRadius: BorderRadius.circular(4)),
+                          child: const Row(
+                            children: [
+                              Icon(Icons.directions_run,
+                                  color: Colors.white, size: 12),
+                              SizedBox(width: 4),
+                              Text('ASAP',
+                                  style: TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.bold)),
+                            ],
+                          ),
+                        ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: Colors.green.withValues(alpha: 0.2),
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          '₦${earnings.toStringAsFixed(0)}',
+                          style: const TextStyle(
+                            color: Colors.green,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                          ),
+                        ),
                       ),
-                    ),
+                    ],
                   ),
                   Text(
                     '${distance.toStringAsFixed(1)} km',
-                    style: const TextStyle(
-                      color: Colors.grey,
-                      fontSize: 14,
-                    ),
+                    style: const TextStyle(color: Colors.grey, fontSize: 14),
                   ),
                 ],
               ),
@@ -328,9 +473,16 @@ class _AvailableJobsScreenState extends ConsumerState<AvailableJobsScreen> {
   }
 
   double _calculateDistance(OrderModel order) {
-    // Simplified distance calculation
-    // In production, use geolocator distance calculation
-    return 2.5;
+    if (currentPosition == null) return 0.0;
+
+    final distanceInMeters = Geolocator.distanceBetween(
+      currentPosition!.latitude,
+      currentPosition!.longitude,
+      order.pickup.latitude,
+      order.pickup.longitude,
+    );
+
+    return distanceInMeters / 1000; // Convert to km
   }
 
   String _getTimeAgo(DateTime time) {

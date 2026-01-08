@@ -23,7 +23,13 @@ final currentUserProvider = StreamProvider<UserModel?>((ref) {
       return ref.watch(userServiceProvider).streamUser(user.uid);
     },
     loading: () => Stream.value(null),
-    error: (_, __) => Stream.value(null),
+    error: (e, st) {
+      // ignore: avoid_print
+      print('AuthProvider Error: $e');
+      // ignore: avoid_print
+      print(st);
+      return Stream.value(null);
+    },
   );
 });
 

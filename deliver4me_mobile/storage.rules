@@ -3,26 +3,27 @@ rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
     
-    // Helper function
-    function isAuthenticated() {
+    // Helper functions
+    function isSignedIn() {
       return request.auth != null;
     }
     
-    // Profile photos - users can only upload/read their own
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    // Profile photos: Everyone can view, only owner can upload
     match /profile_photos/{userId}/{allPaths=**} {
-      allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && request.auth.uid == userId;
-      allow delete: if isAuthenticated() && request.auth.uid == userId;
+      allow read: if isSignedIn();
+      allow write: if isOwner(userId);
     }
-    
-    // Order attachments - sender and assigned rider can access
-    match /order_attachments/{orderId}/{allPaths=**} {
-      allow read: if isAuthenticated();
-      allow write: if isAuthenticated();
-      allow delete: if false; // Keep attachments for records
+
+    // KYC Documents: Only owner and authorized staff can view/upload
+    match /kyc_documents/{userId}/{allPaths=**} {
+      allow read, write: if isOwner(userId);
     }
-    
-    // Block everything else
+
+    // Default: Deny all
     match /{allPaths=**} {
       allow read, write: if false;
     }

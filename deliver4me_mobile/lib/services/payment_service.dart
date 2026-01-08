@@ -1,11 +1,13 @@
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 
 class PaymentService {
   final String _paystackPublicKey;
+  final String? _paystackSecretKey;
   final String _baseUrl = 'https://api.paystack.co';
 
-  PaymentService(this._paystackPublicKey);
+  PaymentService(this._paystackPublicKey, [this._paystackSecretKey]);
 
   // Initialize transaction
   Future<Map<String, dynamic>> initializeTransaction({
@@ -14,10 +16,23 @@ class PaymentService {
     required String reference,
   }) async {
     try {
+      // NOTE: Transaction initialization requires Secret Key
+      if (_paystackSecretKey == null || _paystackSecretKey!.isEmpty) {
+        throw Exception(
+            'Paystack Secret Key is missing. Please add "paystackSecretKey" to FirebaseConfig.');
+      }
+      if (_paystackSecretKey!.startsWith('pk_')) {
+        // User likely provided Public Key as Secret Key
+        debugPrint(
+            'WARNING: You are using a Public Key (starts with pk_) as a Secret Key. Method "initializeTransaction" requires a Secret Key (sk_test_... or sk_live_...). Transaction may fail.');
+      }
+
+      final key = _paystackSecretKey;
+
       final response = await http.post(
         Uri.parse('$_baseUrl/transaction/initialize'),
         headers: {
-          'Authorization': 'Bearer $_paystackPublicKey',
+          'Authorization': 'Bearer $key',
           'Content-Type': 'application/json',
         },
         body: json.encode({
@@ -41,10 +56,14 @@ class PaymentService {
   // Verify transaction
   Future<Map<String, dynamic>> verifyTransaction(String reference) async {
     try {
+      // NOTE: Verification MUST use the Secret Key, not the Public Key.
+      // In a real production app, this should be done on a backend/server.
+      final key = _paystackSecretKey ?? _paystackPublicKey;
+
       final response = await http.get(
         Uri.parse('$_baseUrl/transaction/verify/$reference'),
         headers: {
-          'Authorization': 'Bearer $_paystackPublicKey',
+          'Authorization': 'Bearer $key',
         },
       );
 
@@ -57,7 +76,8 @@ class PaymentService {
       }
       return {'status': 'failed', 'message': 'Verification request failed'};
     } catch (e) {
-      return {'status': 'failed', 'message': e.toString()};
+      debugPrint('Error verifying transaction: $e');
+      return {'status': 'error', 'message': e.toString()};
     }
   }
 

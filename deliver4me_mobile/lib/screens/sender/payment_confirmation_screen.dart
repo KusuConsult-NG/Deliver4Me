@@ -79,7 +79,7 @@ class PaymentConfirmationScreen extends StatelessWidget {
                   _buildDetailRow('Order ID', orderId.substring(0, 8)),
                   const Divider(height: 24),
                   _buildDetailRow(
-                      'Amount Paid', '\$${amount.toStringAsFixed(2)}'),
+                      'Amount Paid', '₦${amount.toStringAsFixed(0)}'),
                   const Divider(height: 24),
                   _buildDetailRow('Payment Method', paymentMethod),
                   const Divider(height: 24),

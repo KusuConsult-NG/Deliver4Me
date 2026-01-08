@@ -3,8 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:deliver4me_mobile/providers/auth_provider.dart';
 import 'package:deliver4me_mobile/services/order_service.dart';
 import 'package:deliver4me_mobile/models/order_model.dart';
-import 'package:deliver4me_mobile/screens/sender/geolocation_selection_screen.dart';
+import 'package:deliver4me_mobile/screens/sender/real_geolocation_screen.dart';
 import 'package:deliver4me_mobile/screens/sender/select_payment_method_screen.dart';
+import 'dart:math';
 
 class CreateDeliveryScreen extends ConsumerStatefulWidget {
   const CreateDeliveryScreen({super.key});
@@ -28,11 +29,21 @@ class _CreateDeliveryScreenState extends ConsumerState<CreateDeliveryScreen> {
   String selectedWeight = 'Small';
   double estimatedPrice = 0.0;
   bool isLoading = false;
+  bool _isUrgent = false;
+  bool _isASAP = true;
+
+  final _pickupDetailController = TextEditingController();
+  final _dropoffDetailController = TextEditingController();
+  final _bidPriceController = TextEditingController();
+
+  double? _calculatedDistance;
+  bool _showBiddingUI = false;
 
   final weightCategories = {
     'Small': {'icon': Icons.inbox, 'weight': '0-2 kg', 'price': 5.0},
     'Medium': {'icon': Icons.shopping_bag, 'weight': '2-10 kg', 'price': 10.0},
     'Large': {'icon': Icons.inventory_2, 'weight': '10-25 kg', 'price': 20.0},
+    'Heavy': {'icon': Icons.local_shipping, 'weight': '> 25 kg', 'price': 40.0},
   };
 
   @override
@@ -41,7 +52,29 @@ class _CreateDeliveryScreenState extends ConsumerState<CreateDeliveryScreen> {
     _recipientNameController.dispose();
     _recipientPhoneController.dispose();
     _notesController.dispose();
+    _pickupDetailController.dispose();
+    _dropoffDetailController.dispose();
+    _bidPriceController.dispose();
     super.dispose();
+  }
+
+  double _calculateDistance(LocationData pickup, LocationData dropoff) {
+    const double earthRadius = 6371; // km
+    final dLat = _toRadians(dropoff.latitude - pickup.latitude);
+    final dLon = _toRadians(dropoff.longitude - pickup.longitude);
+
+    final a = sin(dLat / 2) * sin(dLat / 2) +
+        cos(_toRadians(pickup.latitude)) *
+            cos(_toRadians(dropoff.latitude)) *
+            sin(dLon / 2) *
+            sin(dLon / 2);
+
+    final c = 2 * asin(sqrt(a));
+    return earthRadius * c;
+  }
+
+  double _toRadians(double degrees) {
+    return degrees * pi / 180;
   }
 
   void _updateEstimatedPrice() {
@@ -50,6 +83,7 @@ class _CreateDeliveryScreenState extends ConsumerState<CreateDeliveryScreen> {
       // Simple distance-based pricing (in production, use actual distance calculation)
       setState(() {
         estimatedPrice = basePrice + 5.0; // +$5 for distance
+        if (_isUrgent) estimatedPrice += 50.0;
       });
     }
   }
@@ -58,13 +92,18 @@ class _CreateDeliveryScreenState extends ConsumerState<CreateDeliveryScreen> {
     final result = await Navigator.push<LocationData>(
       context,
       MaterialPageRoute(
-        builder: (context) => const GeolocationSelectionScreen(isPickup: true),
+        builder: (context) => const RealGeolocationScreen(isPickup: true),
       ),
     );
 
     if (result != null) {
       setState(() {
         pickupLocation = result;
+        // Calculate distance if both locations are set
+        if (dropoffLocation != null) {
+          _calculatedDistance = _calculateDistance(result, dropoffLocation!);
+          _showBiddingUI = _calculatedDistance! > 50;
+        }
       });
       _updateEstimatedPrice();
     }
@@ -74,19 +113,34 @@ class _CreateDeliveryScreenState extends ConsumerState<CreateDeliveryScreen> {
     final result = await Navigator.push<LocationData>(
       context,
       MaterialPageRoute(
-        builder: (context) => const GeolocationSelectionScreen(isPickup: false),
+        builder: (context) => const RealGeolocationScreen(isPickup: false),
       ),
     );
 
     if (result != null) {
       setState(() {
         dropoffLocation = result;
+        // Calculate distance if both locations are set
+        if (pickupLocation != null) {
+          _calculatedDistance = _calculateDistance(pickupLocation!, result);
+          _showBiddingUI = _calculatedDistance! > 50;
+        }
       });
       _updateEstimatedPrice();
     }
   }
 
   Future<void> _createOrder() async {
+    if (pickupLocation == null || dropoffLocation == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Please select pickup and drop-off locations'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
     if (!_formKey.currentState!.validate()) return;
 
     if (pickupLocation == null || dropoffLocation == null) {
@@ -116,6 +170,12 @@ class _CreateDeliveryScreenState extends ConsumerState<CreateDeliveryScreen> {
 
     try {
       // Create the order
+      // Parse bid price if provided for long distance
+      double? bidPrice;
+      if (_showBiddingUI && _bidPriceController.text.isNotEmpty) {
+        bidPrice = double.tryParse(_bidPriceController.text);
+      }
+
       final orderId = await orderService.createOrder(
         senderId: user.uid,
         pickup: pickupLocation!,
@@ -126,6 +186,9 @@ class _CreateDeliveryScreenState extends ConsumerState<CreateDeliveryScreen> {
         weightCategory: selectedWeight,
         paymentMethod: 'pending', // Will be updated after payment
         notes: _notesController.text.trim(),
+        isUrgent: _isUrgent,
+        isASAP: _isASAP,
+        bidPrice: bidPrice, // Pass bid price for 50km+ orders
       );
 
       if (mounted) {
@@ -201,6 +264,21 @@ class _CreateDeliveryScreenState extends ConsumerState<CreateDeliveryScreen> {
                     _selectPickupLocation,
                     pickupLocation != null,
                   ),
+                  if (pickupLocation != null)
+                    Padding(
+                      padding:
+                          const EdgeInsets.only(top: 8, left: 16, right: 16),
+                      child: TextFormField(
+                        controller: _pickupDetailController,
+                        style: const TextStyle(color: Colors.black),
+                        decoration: const InputDecoration(
+                          labelText: 'Pickup Building / Flat / Instructions',
+                          hintText: 'e.g. Blue Gate, Flat 4B',
+                          prefixIcon: Icon(Icons.meeting_room, size: 18),
+                          isDense: true,
+                        ),
+                      ),
+                    ),
 
                   const SizedBox(height: 12),
 
@@ -212,6 +290,21 @@ class _CreateDeliveryScreenState extends ConsumerState<CreateDeliveryScreen> {
                     _selectDropoffLocation,
                     dropoffLocation != null,
                   ),
+                  if (dropoffLocation != null)
+                    Padding(
+                      padding:
+                          const EdgeInsets.only(top: 8, left: 16, right: 16),
+                      child: TextFormField(
+                        controller: _dropoffDetailController,
+                        style: const TextStyle(color: Colors.black),
+                        decoration: const InputDecoration(
+                          labelText: 'Drop-off Building / Flat / Instructions',
+                          hintText: 'e.g. Reception, Ask for John',
+                          prefixIcon: Icon(Icons.meeting_room, size: 18),
+                          isDense: true,
+                        ),
+                      ),
+                    ),
 
                   const SizedBox(height: 24),
 
@@ -224,14 +317,18 @@ class _CreateDeliveryScreenState extends ConsumerState<CreateDeliveryScreen> {
 
                   TextFormField(
                     controller: _parcelDescriptionController,
+                    style: const TextStyle(color: Colors.black),
                     decoration: const InputDecoration(
                       labelText: 'What are you sending?',
                       hintText: 'e.g. Documents, Electronics, Food',
                       prefixIcon: Icon(Icons.inventory),
                     ),
                     validator: (value) {
-                      if (value == null || value.isEmpty) {
+                      if (value == null || value.trim().isEmpty) {
                         return 'Please describe the parcel';
+                      }
+                      if (value.trim().length < 3) {
+                        return 'Description is too short';
                       }
                       return null;
                     },
@@ -268,12 +365,13 @@ class _CreateDeliveryScreenState extends ConsumerState<CreateDeliveryScreen> {
 
                   TextFormField(
                     controller: _recipientNameController,
+                    style: const TextStyle(color: Colors.black),
                     decoration: const InputDecoration(
                       labelText: 'Recipient Name',
                       prefixIcon: Icon(Icons.person),
                     ),
                     validator: (value) {
-                      if (value == null || value.isEmpty) {
+                      if (value == null || value.trim().isEmpty) {
                         return 'Please enter recipient name';
                       }
                       return null;
@@ -284,6 +382,7 @@ class _CreateDeliveryScreenState extends ConsumerState<CreateDeliveryScreen> {
 
                   TextFormField(
                     controller: _recipientPhoneController,
+                    style: const TextStyle(color: Colors.black),
                     decoration: const InputDecoration(
                       labelText: 'Recipient Phone',
                       prefixIcon: Icon(Icons.phone),
@@ -293,6 +392,9 @@ class _CreateDeliveryScreenState extends ConsumerState<CreateDeliveryScreen> {
                       if (value == null || value.isEmpty) {
                         return 'Please enter recipient phone';
                       }
+                      if (!RegExp(r'^\+?[0-9]{10,15}$').hasMatch(value)) {
+                        return 'Please enter a valid phone number';
+                      }
                       return null;
                     },
                   ),
@@ -301,6 +403,7 @@ class _CreateDeliveryScreenState extends ConsumerState<CreateDeliveryScreen> {
 
                   TextFormField(
                     controller: _notesController,
+                    style: const TextStyle(color: Colors.black),
                     decoration: const InputDecoration(
                       labelText: 'Additional Notes (Optional)',
                       hintText: 'Special instructions',
@@ -310,6 +413,91 @@ class _CreateDeliveryScreenState extends ConsumerState<CreateDeliveryScreen> {
                   ),
 
                   const SizedBox(height: 24),
+
+                  // Switches
+                  SwitchListTile(
+                    title: const Text('Deliver ASAP'),
+                    subtitle:
+                        const Text('Rider will head to pickup immediately'),
+                    value: _isASAP,
+                    activeThumbColor: const Color(0xFF135BEC),
+                    onChanged: (val) {
+                      setState(() => _isASAP = val);
+                    },
+                  ),
+                  SwitchListTile(
+                    title: const Row(
+                      children: [
+                        Text('Urgent Delivery'),
+                        SizedBox(width: 8),
+                        Icon(Icons.flash_on, color: Colors.orange, size: 20),
+                      ],
+                    ),
+                    subtitle:
+                        const Text('Priority matching + Urgent Badge (+₦50)'),
+                    value: _isUrgent,
+                    activeThumbColor: Colors.orange,
+                    onChanged: (val) {
+                      setState(() {
+                        _isUrgent = val;
+                        _updateEstimatedPrice();
+                      });
+                    },
+                  ),
+
+                  const SizedBox(height: 24),
+
+                  // Bidding UI for 50km+ orders
+                  if (_showBiddingUI && _calculatedDistance != null)
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 24),
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: Colors.orange.withValues(alpha: 0.1),
+                        border: Border.all(color: Colors.orange, width: 2),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Row(
+                            children: [
+                              const Icon(Icons.info_outline,
+                                  color: Colors.orange),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: Text(
+                                  'Long Distance: ${_calculatedDistance!.toStringAsFixed(1)}km',
+                                  style: const TextStyle(
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 16,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          const Text(
+                            'Distance exceeds 50km. Please set your custom price:',
+                            style: TextStyle(color: Colors.grey),
+                          ),
+                          const SizedBox(height: 12),
+                          TextField(
+                            controller: _bidPriceController,
+                            style: const TextStyle(color: Colors.black),
+                            decoration: const InputDecoration(
+                              labelText: 'Your Proposed Price',
+                              prefixText: '₦',
+                              hintText: '3000',
+                              border: OutlineInputBorder(),
+                              helperText:
+                                  'Riders can accept or reject your offer',
+                            ),
+                            keyboardType: TextInputType.number,
+                          ),
+                        ],
+                      ),
+                    ),
 
                   // Price Summary
                   if (estimatedPrice > 0)
@@ -332,7 +520,7 @@ class _CreateDeliveryScreenState extends ConsumerState<CreateDeliveryScreen> {
                             ),
                           ),
                           Text(
-                            '\$${estimatedPrice.toStringAsFixed(2)}',
+                            '₦${estimatedPrice.toStringAsFixed(2)}',
                             style: const TextStyle(
                               color: Colors.white,
                               fontSize: 24,
@@ -486,9 +674,40 @@ class _CreateDeliveryScreenState extends ConsumerState<CreateDeliveryScreen> {
                 color: isSelected ? Colors.white70 : Colors.grey[600],
               ),
             ),
+            const SizedBox(height: 4),
+            // Vehicle Hint
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+              decoration: BoxDecoration(
+                color: isSelected ? Colors.white24 : Colors.black12,
+                borderRadius: BorderRadius.circular(4),
+              ),
+              child: Text(
+                _getVehicleHint(weight),
+                style: TextStyle(
+                  fontSize: 8,
+                  color: isSelected ? Colors.white : Colors.grey,
+                ),
+              ),
+            ),
           ],
         ),
       ),
     );
+  }
+
+  String _getVehicleHint(String weight) {
+    switch (weight) {
+      case 'Small':
+        return 'Motorcycle';
+      case 'Medium':
+        return 'Bike/Car';
+      case 'Large':
+        return 'Car Selected';
+      case 'Heavy':
+        return 'Van Required';
+      default:
+        return 'Standard';
+    }
   }
 }

@@ -4,65 +4,45 @@ service cloud.firestore {
   match /databases/{database}/documents {
     
     // Helper functions
-    function isAuthenticated() {
+    function isSignedIn() {
       return request.auth != null;
     }
     
     function isOwner(userId) {
-      return isAuthenticated() && request.auth.uid == userId;
+      return isSignedIn() && request.auth.uid == userId;
     }
-    
-    // Users collection
+
+    // User profiles
     match /users/{userId} {
-      // Users can read their own data
-      allow read: if isOwner(userId);
+      allow read: if isSignedIn();
+      allow write: if isOwner(userId);
       
-      // Users can create their own profile
-      allow create: if isOwner(userId);
+      // Transactions subcollection
+      match /transactions/{transactionId} {
+        allow read: if isOwner(userId);
+        allow write: if false; // Only via backend/service with admin SDK
+      }
       
-      // Users can update their own profile
-      allow update: if isOwner(userId);
-      
-      // No one can delete users (only through Firebase Admin)
-      allow delete: if false;
+      // Cards subcollection
+      match /cards/{cardId} {
+        allow read, write: if isOwner(userId);
+      }
     }
-    
-    // Orders collection
+
+    // Orders
     match /orders/{orderId} {
-      // Allow read if user is the sender or assigned rider
-      allow read: if isAuthenticated() && (
-        resource.data.senderId == request.auth.uid ||
-        resource.data.riderId == request.auth.uid
+      allow create: if isSignedIn();
+      allow read: if isSignedIn() && (
+        resource.data.senderId == request.auth.uid || 
+        resource.data.riderId == request.auth.uid ||
+        resource.data.status == 'pending'
       );
-      
-      // Allow create if authenticated (sender creating order)
-      allow create: if isAuthenticated() && 
-        request.resource.data.senderId == request.auth.uid;
-      
-      // Allow update if user is sender (before rider assigned) or rider (after assignment)
-      allow update: if isAuthenticated() && (
-        // Sender can update before rider is assigned
-        (resource.data.senderId == request.auth.uid && resource.data.riderId == null) ||
-        // Rider can update their assigned orders
-        (resource.data.riderId == request.auth.uid) ||
-        // Rider accepting an order (adding themselves as riderId)
-        (request.resource.data.riderId == request.auth.uid && resource.data.riderId == null)
+      allow update: if isSignedIn() && (
+        resource.data.senderId == request.auth.uid || 
+        resource.data.riderId == request.auth.uid ||
+        (resource.data.status == 'pending' && request.resource.data.status == 'accepted')
       );
-      
-      // No one can delete orders (keep for records)
       allow delete: if false;
-    }
-    
-    // Payments collection (if you add it later)
-    match /payments/{paymentId} {
-      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
-      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid;
-      allow update, delete: if false; // Payments are immutable
-    }
-    
-    // Block all other collections by default
-    match /{document=**} {
-      allow read, write: if false;
     }
   }
 }

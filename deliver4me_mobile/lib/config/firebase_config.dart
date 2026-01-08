@@ -7,10 +7,12 @@ class FirebaseConfig {
   // Paystack Public Key
   static const String paystackPublicKey =
       'pk_test_3e87802dae281fbeb004f2b0f741a6e662aba103';
+  static const String paystackSecretKey =
+      'sk_test_a9f9bb469003bb62a585af63d47fa7bdbf587705';
 
   // App Configuration
   static const String appName = 'Deliver4Me';
-  static const bool isDevelopment = true;
+  static const bool isDevelopment = false;
 
   // Firestore Collections
   static const String usersCollection = 'users';

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_core/firebase_core.dart';
+import 'package:deliver4me_mobile/services/notification_service.dart';
+import 'package:deliver4me_mobile/services/connectivity_service.dart';
 import 'package:deliver4me_mobile/screens/test/api_test_screen.dart';
 import 'package:deliver4me_mobile/screens/onboarding/welcome_screen.dart';
 import 'package:deliver4me_mobile/screens/onboarding/login_registration_screen.dart';
@@ -15,9 +17,11 @@ import 'package:deliver4me_mobile/screens/sender/select_payment_method_screen.da
 import 'package:deliver4me_mobile/screens/sender/add_new_card_screen.dart';
 import 'package:deliver4me_mobile/screens/sender/payment_confirmation_screen.dart';
 import 'package:deliver4me_mobile/screens/rider/available_jobs_screen.dart';
-import 'package:deliver4me_mobile/screens/rider/job_details_screen.dart';
+// import 'package:deliver4me_mobile/screens/rider/job_details_screen.dart'; // Not used in main menu
 import 'package:deliver4me_mobile/screens/rider/rider_wallet_screen.dart';
-import 'package:deliver4me_mobile/screens/rider/kyc_verification_screen.dart';
+import 'package:deliver4me_mobile/screens/rider/vehicle_selection_screen.dart';
+import 'package:deliver4me_mobile/screens/common/identity_verification_screen.dart';
+import 'package:deliver4me_mobile/screens/home/home_screen.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -25,9 +29,10 @@ void main() async {
   // Initialize Firebase
   try {
     await Firebase.initializeApp();
+    // Initialize Notifications
+    await NotificationService().initialize();
   } catch (e) {
     debugPrint('Firebase initialization error: $e');
-    // Firebase not configured yet - app will run without backend
   }
 
   runApp(
@@ -42,21 +47,73 @@ class Deliver4MeApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Deliver4Me',
-      debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        brightness: Brightness.dark,
-        primaryColor: const Color(0xFF135BEC),
-        scaffoldBackgroundColor: const Color(0xFF101622),
-        colorScheme: const ColorScheme.dark(
-          primary: Color(0xFF135BEC),
-          secondary: Color(0xFF135BEC),
-          surface: Color(0xFF1C2433),
-        ),
-      ),
-      home: const ScreenSelector(),
+    return Consumer(
+      builder: (context, ref, child) {
+        final connectivity = ref.watch(connectivityProvider);
+
+        return MaterialApp(
+          title: 'Deliver4Me',
+          debugShowCheckedModeBanner: false,
+          theme: ThemeData(
+            useMaterial3: true,
+            brightness: Brightness.dark,
+            primaryColor: const Color(0xFF135BEC),
+            scaffoldBackgroundColor: const Color(0xFF101622),
+            colorScheme: const ColorScheme.dark(
+              primary: Color(0xFF135BEC),
+              secondary: Color(0xFF135BEC),
+              surface: Color(0xFF1C2433),
+            ),
+          ),
+          builder: (context, child) {
+            return Stack(
+              children: [
+                child!,
+                if (connectivity == ConnectivityStatus.isDisconnected)
+                  Positioned(
+                    top: MediaQuery.of(context).padding.top,
+                    left: 0,
+                    right: 0,
+                    child: Material(
+                      color: Colors.red,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        child: const Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(Icons.wifi_off, size: 16, color: Colors.white),
+                            SizedBox(width: 8),
+                            Text(
+                              'No Internet Connection',
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            );
+          },
+          initialRoute: '/',
+          routes: {
+            '/': (context) => const WelcomeScreen(),
+            '/login': (context) => const LoginRegistrationScreen(),
+            '/profile-setup': (context) => const ProfileSetupScreen(),
+            '/permissions': (context) => const PermissionsScreen(),
+            '/tutorial': (context) => const TutorialScreen(),
+            '/role-confirmation': (context) => const RoleConfirmationScreen(),
+            '/vehicle-selection': (context) => const VehicleSelectionScreen(),
+            '/home': (context) => const HomeScreen(),
+            '/create-delivery': (context) => const CreateDeliveryScreen(),
+            '/available-jobs': (context) => const AvailableJobsScreen(),
+            '/api-tests': (context) => const ApiTestScreen(),
+          },
+        );
+      },
     );
   }
 }
@@ -122,15 +179,13 @@ class ScreenSelector extends StatelessWidget {
                   paymentMethod: 'Card')),
 
           const SizedBox(height: 24),
-          const _SectionHeader(title: 'Rider Screens (4 screens)'),
+          const _SectionHeader(title: 'Rider Screens (3 screens)'),
           _buildScreenButton(
               context, '13. Available Jobs', const AvailableJobsScreen()),
-          _buildScreenButton(context, '14. Job Details 🗺️',
-              const JobDetailsScreen(orderId: 'demo-order-123')),
           _buildScreenButton(
-              context, '15. Rider Wallet', const RiderWalletScreen()),
-          _buildScreenButton(
-              context, '16. KYC Verification', const KYCVerificationScreen()),
+              context, '14. Rider Wallet', const RiderWalletScreen()),
+          _buildScreenButton(context, '15. Identity Verification (KYC)',
+              const IdentityVerificationScreen()),
 
           const SizedBox(height: 32),
           Container(

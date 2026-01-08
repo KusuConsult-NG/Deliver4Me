@@ -1,8 +1,14 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:deliver4me_mobile/services/order_service.dart';
+import 'package:deliver4me_mobile/services/payment_service.dart';
 import 'package:deliver4me_mobile/models/order_model.dart';
+import 'package:deliver4me_mobile/config/firebase_config.dart';
 
 final orderService = OrderService();
+final paymentService = PaymentService(
+  FirebaseConfig.paystackPublicKey,
+  FirebaseConfig.paystackSecretKey,
+);
 
 // Stream provider for a single order by ID
 final orderStreamProvider =

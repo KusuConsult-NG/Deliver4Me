@@ -9,7 +9,7 @@ plugins {
 android {
     namespace = "ng.deliverme.deliver4me_mobile"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
+    // ndkVersion = flutter.ndkVersion
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -36,6 +36,15 @@ android {
             // TODO: Add your own signing config for the release build.
             // Signing with the debug keys for now, so `flutter run --release` works.
             signingConfig = signingConfigs.getByName("debug")
+            
+            // Enables code shrinking, obfuscation, and optimization
+            isMinifyEnabled = false
+            isShrinkResources = false
+            
+            // proguardFiles(
+            //    getDefaultProguardFile("proguard-android-optimize.txt"),
+            //    "proguard-rules.pro"
+            // )
         }
     }
 }

@@ -6,6 +6,7 @@ import 'package:deliver4me_mobile/services/order_service.dart';
 import 'package:deliver4me_mobile/models/order_model.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:deliver4me_mobile/screens/rider/rider_active_delivery_screen.dart';
 
 class JobDetailsScreen extends ConsumerStatefulWidget {
   final String orderId;
@@ -39,11 +40,17 @@ class _JobDetailsScreenState extends ConsumerState<JobDetailsScreen> {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Job accepted! Navigate to order'),
+            content: Text('Job accepted!'),
             backgroundColor: Colors.green,
           ),
         );
-        Navigator.pop(context, true);
+        Navigator.pop(context); // Close details
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (context) => RiderActiveDeliveryScreen(orderId: order.id),
+          ),
+        );
       }
     } catch (e) {
       if (mounted) {
@@ -148,7 +155,7 @@ class _JobDetailsScreenState extends ConsumerState<JobDetailsScreen> {
                                 ),
                               ),
                               Text(
-                                '\$${order.price.toStringAsFixed(2)}',
+                                '₦${order.price.toStringAsFixed(2)}',
                                 style: const TextStyle(
                                   fontSize: 32,
                                   fontWeight: FontWeight.bold,
@@ -254,7 +261,7 @@ class _JobDetailsScreenState extends ConsumerState<JobDetailsScreen> {
       ),
       bottomNavigationBar: orderStream.maybeWhen(
         data: (order) {
-          if (order == null || order.status != 'pending') return null;
+          if (order == null || order.status != OrderStatus.pending) return null;
 
           return SafeArea(
             child: Padding(

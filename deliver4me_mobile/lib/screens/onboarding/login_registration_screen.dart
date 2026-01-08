@@ -3,6 +3,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:deliver4me_mobile/services/auth_service.dart';
 import 'package:deliver4me_mobile/models/user_model.dart';
 
+import 'package:flutter/services.dart';
+import 'package:local_auth/local_auth.dart';
+// import 'package:local_auth/error_codes.dart' as auth_error; // Unused
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+
 class LoginRegistrationScreen extends ConsumerStatefulWidget {
   const LoginRegistrationScreen({super.key});
 
@@ -17,6 +22,16 @@ class _LoginRegistrationScreenState
   late TabController _tabController;
   String selectedRole = 'sender';
   bool isLoading = false;
+
+  // Password Visibility
+  bool _obscureLoginPassword = true;
+  bool _obscureSignupPassword = true;
+  bool _obscureSignupConfirmPassword = true;
+
+  // Biometrics
+  final LocalAuthentication auth = LocalAuthentication();
+  final _storage = const FlutterSecureStorage();
+  bool _canCheckBiometrics = false;
 
   // Form controllers
   final _loginEmailController = TextEditingController();
@@ -36,6 +51,79 @@ class _LoginRegistrationScreenState
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+    _checkBiometrics();
+  }
+
+  Future<void> _checkBiometrics() async {
+    try {
+      final canCheck = await auth.canCheckBiometrics;
+      if (mounted) {
+        setState(() => _canCheckBiometrics = canCheck);
+      }
+    } on PlatformException catch (_) {
+      // Handle error gracefully
+    }
+  }
+
+  Future<void> _authenticate() async {
+    try {
+      final authenticated = await auth.authenticate(
+        localizedReason: 'Authenticate to login',
+        options: const AuthenticationOptions(
+          stickyAuth: true,
+          biometricOnly: true,
+        ),
+      );
+
+      if (authenticated && mounted) {
+        setState(() => isLoading = true);
+        try {
+          final email = await _storage.read(key: 'email');
+          final password = await _storage.read(key: 'password');
+
+          if (email != null && password != null) {
+            await authService.signInWithEmail(
+              email: email,
+              password: password,
+            );
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                    content: Text('Welcome back!'),
+                    backgroundColor: Colors.green),
+              );
+              Navigator.pushReplacementNamed(context, '/home');
+            }
+          } else {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                    content: Text(
+                        'Please log in manually once to enable biometrics.'),
+                    backgroundColor: Colors.orange),
+              );
+            }
+          }
+        } catch (e) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                  content: Text('Biometric login failed: $e'),
+                  backgroundColor: Colors.red),
+            );
+          }
+        } finally {
+          if (mounted) setState(() => isLoading = false);
+        }
+      }
+    } on PlatformException catch (e) {
+      debugPrint(e.toString());
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Authentication Error: ${e.message}')),
+        );
+      }
+    }
   }
 
   @override
@@ -60,6 +148,12 @@ class _LoginRegistrationScreenState
         email: _loginEmailController.text.trim(),
         password: _loginPasswordController.text,
       );
+
+      // Save credentials for biometrics
+      await _storage.write(
+          key: 'email', value: _loginEmailController.text.trim());
+      await _storage.write(
+          key: 'password', value: _loginPasswordController.text);
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -137,7 +231,10 @@ class _LoginRegistrationScreenState
     setState(() => isLoading = true);
 
     try {
-      final result = await authService.signInWithGoogle();
+      final result = await authService.signInWithGoogle(
+        selectedRole:
+            selectedRole == 'rider' ? UserRole.rider : UserRole.sender,
+      );
 
       if (result != null && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -164,6 +261,12 @@ class _LoginRegistrationScreenState
 
   @override
   Widget build(BuildContext context) {
+    // Get role from arguments if available
+    final args = ModalRoute.of(context)?.settings.arguments;
+    if (args != null && args is String) {
+      selectedRole = args;
+    }
+
     return Scaffold(
       appBar: AppBar(
         leading: IconButton(
@@ -179,6 +282,31 @@ class _LoginRegistrationScreenState
             padding: const EdgeInsets.all(16),
             child: Column(
               children: [
+                // App Logo
+                Container(
+                  width: 80,
+                  height: 80,
+                  margin: const EdgeInsets.only(bottom: 32),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.1),
+                        blurRadius: 10,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(16),
+                    child: Image.asset(
+                      'assets/images/logo.jpg',
+                      fit: BoxFit.cover,
+                    ),
+                  ),
+                ),
+
                 // Tab switcher
                 Container(
                   decoration: BoxDecoration(
@@ -348,12 +476,22 @@ class _LoginRegistrationScreenState
           const SizedBox(height: 16),
           TextFormField(
             controller: _loginPasswordController,
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
               labelText: 'Password',
               hintText: 'Enter your password',
-              prefixIcon: Icon(Icons.lock),
+              prefixIcon: const Icon(Icons.lock),
+              suffixIcon: IconButton(
+                icon: Icon(_obscureLoginPassword
+                    ? Icons.visibility
+                    : Icons.visibility_off),
+                onPressed: () {
+                  setState(() {
+                    _obscureLoginPassword = !_obscureLoginPassword;
+                  });
+                },
+              ),
             ),
-            obscureText: true,
+            obscureText: _obscureLoginPassword,
             validator: (value) {
               if (value == null || value.isEmpty) {
                 return 'Please enter your password';
@@ -373,6 +511,15 @@ class _LoginRegistrationScreenState
               child: const Text('Login'),
             ),
           ),
+          if (_canCheckBiometrics) ...[
+            const SizedBox(height: 16),
+            IconButton(
+              icon: const Icon(Icons.fingerprint,
+                  size: 40, color: Color(0xFF135BEC)),
+              onPressed: _authenticate,
+              tooltip: 'Login with Biometrics',
+            ),
+          ],
         ],
       ),
     );
@@ -419,18 +566,33 @@ class _LoginRegistrationScreenState
           const SizedBox(height: 16),
           TextFormField(
             controller: _signupPasswordController,
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
               labelText: 'Password',
               hintText: 'Create a password',
-              prefixIcon: Icon(Icons.lock),
+              prefixIcon: const Icon(Icons.lock),
+              suffixIcon: IconButton(
+                icon: Icon(_obscureSignupPassword
+                    ? Icons.visibility
+                    : Icons.visibility_off),
+                onPressed: () {
+                  setState(() {
+                    _obscureSignupPassword = !_obscureSignupPassword;
+                  });
+                },
+              ),
             ),
-            obscureText: true,
+            obscureText: _obscureSignupPassword,
             validator: (value) {
               if (value == null || value.isEmpty) {
                 return 'Please enter a password';
               }
-              if (value.length < 6) {
-                return 'Password must be at least 6 characters';
+              if (value.length < 8) {
+                return 'Password must be at least 8 characters';
+              }
+              // Strong password check: Letter + Number
+              if (!value.contains(RegExp(r'[A-Za-z]')) ||
+                  !value.contains(RegExp(r'[0-9]'))) {
+                return 'Password must contain letters and numbers';
               }
               return null;
             },
@@ -438,12 +600,23 @@ class _LoginRegistrationScreenState
           const SizedBox(height: 16),
           TextFormField(
             controller: _signupConfirmPasswordController,
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
               labelText: 'Confirm Password',
               hintText: 'Re-enter your password',
-              prefixIcon: Icon(Icons.lock_outline),
+              prefixIcon: const Icon(Icons.lock_outline),
+              suffixIcon: IconButton(
+                icon: Icon(_obscureSignupConfirmPassword
+                    ? Icons.visibility
+                    : Icons.visibility_off),
+                onPressed: () {
+                  setState(() {
+                    _obscureSignupConfirmPassword =
+                        !_obscureSignupConfirmPassword;
+                  });
+                },
+              ),
             ),
-            obscureText: true,
+            obscureText: _obscureSignupConfirmPassword,
             validator: (value) {
               if (value == null || value.isEmpty) {
                 return 'Please confirm your password';

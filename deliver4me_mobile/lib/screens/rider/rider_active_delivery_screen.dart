@@ -4,9 +4,15 @@ import 'package:deliver4me_mobile/providers/auth_provider.dart';
 import 'package:deliver4me_mobile/providers/order_provider.dart';
 import 'package:deliver4me_mobile/services/order_service.dart';
 import 'package:deliver4me_mobile/services/user_service.dart';
+import 'package:deliver4me_mobile/services/wallet_service.dart';
 import 'package:deliver4me_mobile/models/order_model.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:geolocator/geolocator.dart';
+import 'dart:async';
+import 'package:deliver4me_mobile/screens/rider/delivery_confirmation_screen.dart';
+import 'package:deliver4me_mobile/screens/rider/pickup_verification_screen.dart';
+import 'package:deliver4me_mobile/screens/rider/arrival_screen.dart';
 
 class RiderActiveDeliveryScreen extends ConsumerStatefulWidget {
   final String orderId;
@@ -25,11 +31,39 @@ class _RiderActiveDeliveryScreenState
     extends ConsumerState<RiderActiveDeliveryScreen> {
   final orderService = OrderService();
   final userService = UserService();
+  final walletService = WalletService();
   final _deliveryCodeController = TextEditingController();
   bool isLoading = false;
+  Timer? _locationTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _startLocationTracking();
+  }
+
+  void _startLocationTracking() {
+    _locationTimer = Timer.periodic(const Duration(seconds: 10), (timer) {
+      _updateRiderLocation();
+    });
+  }
+
+  Future<void> _updateRiderLocation() async {
+    try {
+      final position = await Geolocator.getCurrentPosition();
+      await orderService.updateRiderLocation(
+        widget.orderId,
+        position.latitude,
+        position.longitude,
+      );
+    } catch (e) {
+      debugPrint('Error updating location: $e');
+    }
+  }
 
   @override
   void dispose() {
+    _locationTimer?.cancel();
     _deliveryCodeController.dispose();
     super.dispose();
   }
@@ -86,26 +120,112 @@ class _RiderActiveDeliveryScreenState
       await orderService.updateOrderStatus(
           widget.orderId, OrderStatus.delivered);
 
-      // Add earnings to rider wallet
-      await userService.updateWalletBalance(user.uid, order.price);
+      // Add earnings to rider wallet with atomic log
+      await walletService.updateBalanceWithLog(
+        userId: user.uid,
+        amount: order.price,
+        description: 'Delivery earnings: ${order.parcelDescription}',
+        type: 'earning',
+      );
 
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content:
-                Text('Delivery complete! \$${order.price} added to wallet'),
+            content: Text('Delivery complete! ₦${order.price} added to wallet'),
             backgroundColor: Colors.green,
           ),
         );
 
-        // Navigate back to jobs
-        Navigator.popUntil(context, (route) => route.isFirst);
+        // Navigate to confirmation
+        Navigator.pushReplacement(
+          context,
+          MaterialPageRoute(
+            builder: (_) => DeliveryConfirmationScreen(order: order),
+          ),
+        );
       }
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text('Error completing delivery: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => isLoading = false);
+    }
+  }
+
+  // Mark arrival at pickup location
+  Future<void> _markArrivedAtPickup(OrderModel order) async {
+    if (order.arrivedAtPickupTime != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Already marked as arrived at pickup'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    setState(() => isLoading = true);
+    try {
+      await orderService.markArrivedAtPickup(widget.orderId);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('✓ Arrival at pickup marked! Waiting timer started.'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => isLoading = false);
+    }
+  }
+
+  // Mark arrival at dropoff location
+  Future<void> _markArrivedAtDropoff(OrderModel order) async {
+    if (order.arrivedAtDropoffTime != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Already marked as arrived at dropoff'),
+          backgroundColor: Colors.orange,
+        ),
+      );
+      return;
+    }
+
+    setState(() => isLoading = true);
+    try {
+      await orderService.markArrivedAtDropoff(widget.orderId);
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content:
+                Text('✓ Arrival at dropoff marked! Waiting timer started.'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error: $e'),
             backgroundColor: Colors.red,
           ),
         );
@@ -128,6 +248,32 @@ class _RiderActiveDeliveryScreenState
         data: (order) {
           if (order == null) {
             return const Center(child: Text('Order not found'));
+          }
+
+          // Check for Arrival State
+          if (order.status == OrderStatus.accepted &&
+              order.arrivedAtPickupTime != null) {
+            return ArrivalScreen(
+              order: order,
+              isPickup: true,
+              onComplete: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => PickupVerificationScreen(order: order),
+                  ),
+                );
+              },
+            );
+          }
+
+          if (order.status == OrderStatus.inTransit &&
+              order.arrivedAtDropoffTime != null) {
+            return ArrivalScreen(
+              order: order,
+              isPickup: false,
+              onComplete: () => _completeDelivery(order),
+            );
           }
 
           return Stack(
@@ -227,8 +373,8 @@ class _RiderActiveDeliveryScreenState
 
                           const SizedBox(height: 16),
 
-                          // Delivery code input (only when picked up)
-                          if (order.status == 'picked_up') ...[
+                          // Delivery code input (only when in transit)
+                          if (order.status == OrderStatus.inTransit) ...[
                             const Text(
                               'Enter Delivery Code',
                               style: TextStyle(
@@ -316,20 +462,42 @@ class _RiderActiveDeliveryScreenState
       decoration: BoxDecoration(
         color: color,
         borderRadius: BorderRadius.circular(12),
+        boxShadow: [
+          BoxShadow(
+            color: color.withValues(alpha: 0.3),
+            blurRadius: 8,
+            offset: const Offset(0, 4),
+          ),
+        ],
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Icon(icon, color: Colors.white),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              text,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 16,
-                fontWeight: FontWeight.bold,
-              ),
+          const Text(
+            'CURRENT INSTRUCTION',
+            style: TextStyle(
+              color: Colors.white70,
+              fontSize: 10,
+              letterSpacing: 1.2,
+              fontWeight: FontWeight.bold,
             ),
+          ),
+          const SizedBox(height: 4),
+          Row(
+            children: [
+              Icon(icon, color: Colors.white, size: 28),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  text,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 18,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -346,7 +514,7 @@ class _RiderActiveDeliveryScreenState
       ),
       child: Row(
         children: [
-          Icon(icon, color: Color(0xFF135BEC)),
+          Icon(icon, color: const Color(0xFF135BEC)),
           const SizedBox(width: 12),
           Expanded(
             child: Column(
@@ -387,16 +555,63 @@ class _RiderActiveDeliveryScreenState
 
   Widget _buildActionButton(OrderModel order) {
     if (order.status == OrderStatus.accepted) {
+      // Show "Arrived at Pickup" if not yet marked
+      if (order.arrivedAtPickupTime == null) {
+        return ElevatedButton.icon(
+          onPressed: isLoading ? null : () => _markArrivedAtPickup(order),
+          icon: const Icon(Icons.location_on),
+          label: const Text('📍 Arrived at Pickup'),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.orange,
+            padding: const EdgeInsets.symmetric(vertical: 16),
+          ),
+        );
+      }
+      // Already arrived, show pickup confirmation
       return ElevatedButton(
-        onPressed:
-            isLoading ? null : () => _updateStatus(order, OrderStatus.pickedUp),
+        onPressed: isLoading
+            ? null
+            : () async {
+                // Navigate to PickupVerificationScreen
+                await Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => PickupVerificationScreen(order: order),
+                  ),
+                );
+                // On return, stream will update UI if status changed
+              },
         style: ElevatedButton.styleFrom(
           backgroundColor: const Color(0xFF135BEC),
           padding: const EdgeInsets.symmetric(vertical: 16),
         ),
-        child: const Text('Mark as Picked Up'),
+        child: const Text('Verify & Confirm Pickup'),
       );
     } else if (order.status == OrderStatus.pickedUp) {
+      return ElevatedButton(
+        onPressed: isLoading
+            ? null
+            : () => _updateStatus(order, OrderStatus.inTransit),
+        style: ElevatedButton.styleFrom(
+          backgroundColor: Colors.orange,
+          padding: const EdgeInsets.symmetric(vertical: 16),
+        ),
+        child: const Text('Start Transit'),
+      );
+    } else if (order.status == OrderStatus.inTransit) {
+      // Show "Arrived at Dropoff" if not yet marked
+      if (order.arrivedAtDropoffTime == null) {
+        return ElevatedButton.icon(
+          onPressed: isLoading ? null : () => _markArrivedAtDropoff(order),
+          icon: const Icon(Icons.location_on),
+          label: const Text('📍 Arrived at Dropoff'),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: Colors.orange,
+            padding: const EdgeInsets.symmetric(vertical: 16),
+          ),
+        );
+      }
+      // Already arrived, show complete delivery
       return ElevatedButton(
         onPressed: isLoading ? null : () => _completeDelivery(order),
         style: ElevatedButton.styleFrom(

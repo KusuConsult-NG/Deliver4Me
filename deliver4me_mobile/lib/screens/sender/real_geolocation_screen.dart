@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:deliver4me_mobile/models/order_model.dart';
+import 'package:geocoding/geocoding.dart';
 
 class RealGeolocationScreen extends StatefulWidget {
   final bool isPickup;
@@ -20,6 +21,7 @@ class _RealGeolocationScreenState extends State<RealGeolocationScreen> {
   double selectedLng = 0.0;
   bool isLoading = false;
   String errorMessage = '';
+  final TextEditingController _searchController = TextEditingController();
 
   @override
   void initState() {
@@ -70,16 +72,64 @@ class _RealGeolocationScreenState extends State<RealGeolocationScreen> {
         desiredAccuracy: LocationAccuracy.high,
       );
 
+      // Reverse geocode to get address
+      String addressText =
+          'Lat: ${position.latitude.toStringAsFixed(6)}, Lng: ${position.longitude.toStringAsFixed(6)}';
+      try {
+        List<Placemark> placemarks = await placemarkFromCoordinates(
+            position.latitude, position.longitude);
+        if (placemarks.isNotEmpty) {
+          final place = placemarks.first;
+          addressText =
+              '${place.street}, ${place.subLocality}, ${place.locality}';
+        }
+      } catch (e) {
+        debugPrint('Error getting address from coordinates: $e');
+      }
+
       setState(() {
         selectedLat = position.latitude;
         selectedLng = position.longitude;
-        selectedAddress =
-            'Lat: ${position.latitude.toStringAsFixed(6)}, Lng: ${position.longitude.toStringAsFixed(6)}';
+        selectedAddress = addressText;
+        _searchController.text = addressText;
         isLoading = false;
       });
     } catch (e) {
       setState(() {
         errorMessage = 'Error getting location: $e';
+        isLoading = false;
+      });
+    }
+  }
+
+  Future<void> _searchAddress(String query) async {
+    if (query.isEmpty) return;
+    FocusScope.of(context).unfocus(); // Dismiss keyboard
+    setState(() {
+      isLoading = true;
+      errorMessage = '';
+    });
+
+    try {
+      List<Location> locations = await locationFromAddress(query);
+      if (locations.isNotEmpty) {
+        final loc = locations.first;
+        setState(() {
+          selectedLat = loc.latitude;
+          selectedLng = loc.longitude;
+          selectedAddress = query;
+          // _searchController.text = query; // Keep what user typed
+          isLoading = false;
+        });
+      } else {
+        setState(() {
+          errorMessage = 'Address not found';
+          isLoading = false;
+        });
+      }
+    } catch (e) {
+      setState(() {
+        errorMessage = 'Error searching address: $e';
         isLoading = false;
       });
     }
@@ -114,21 +164,24 @@ class _RealGeolocationScreenState extends State<RealGeolocationScreen> {
                   if (isLoading)
                     const CircularProgressIndicator()
                   else if (errorMessage.isNotEmpty)
-                    Column(
-                      children: [
-                        Icon(Icons.error, size: 64, color: Colors.red[400]),
-                        const SizedBox(height: 16),
-                        Text(
-                          errorMessage,
-                          style: const TextStyle(color: Colors.red),
-                          textAlign: TextAlign.center,
-                        ),
-                        const SizedBox(height: 16),
-                        ElevatedButton(
-                          onPressed: _getCurrentLocation,
-                          child: const Text('Retry'),
-                        ),
-                      ],
+                    Padding(
+                      padding: const EdgeInsets.all(32.0),
+                      child: Column(
+                        children: [
+                          Icon(Icons.error, size: 64, color: Colors.red[400]),
+                          const SizedBox(height: 16),
+                          Text(
+                            errorMessage,
+                            style: const TextStyle(color: Colors.red),
+                            textAlign: TextAlign.center,
+                          ),
+                          const SizedBox(height: 16),
+                          ElevatedButton(
+                            onPressed: _getCurrentLocation,
+                            child: const Text('Retry GPS'),
+                          ),
+                        ],
+                      ),
                     )
                   else
                     Column(
@@ -137,25 +190,60 @@ class _RealGeolocationScreenState extends State<RealGeolocationScreen> {
                             size: 64, color: Colors.green[400]),
                         const SizedBox(height: 16),
                         Text(
-                          'Location Retrieved',
+                          'Location Selected',
                           style: TextStyle(
                             color: Colors.grey[400],
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
                           ),
                         ),
-                        const SizedBox(height: 8),
-                        Padding(
-                          padding: const EdgeInsets.symmetric(horizontal: 32),
-                          child: Text(
-                            selectedAddress,
-                            style: TextStyle(color: Colors.grey[600]),
-                            textAlign: TextAlign.center,
-                          ),
-                        ),
+                        // const SizedBox(height: 8),
+                        // Padding(
+                        //   padding: const EdgeInsets.symmetric(horizontal: 32),
+                        //   child: Text(
+                        //     selectedAddress,
+                        //     style: TextStyle(color: Colors.grey[600]),
+                        //     textAlign: TextAlign.center,
+                        //   ),
+                        // ),
                       ],
                     ),
                 ],
+              ),
+            ),
+          ),
+
+          // Search Bar
+          Positioned(
+            top: 16,
+            left: 16,
+            right: 16,
+            child: Container(
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(8),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.1),
+                    blurRadius: 10,
+                    offset: const Offset(0, 5), // Shadow for search bar
+                  ),
+                ],
+              ),
+              child: TextField(
+                controller: _searchController,
+                decoration: InputDecoration(
+                  hintText: 'Search address or zip code...',
+                  prefixIcon: const Icon(Icons.search),
+                  suffixIcon: IconButton(
+                    icon: const Icon(Icons.my_location),
+                    onPressed: _getCurrentLocation,
+                  ),
+                  border: InputBorder.none,
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                ),
+                onSubmitted: _searchAddress,
               ),
             ),
           ),
@@ -187,7 +275,7 @@ class _RealGeolocationScreenState extends State<RealGeolocationScreen> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     const Text(
-                      'Current Location',
+                      'Selected Location',
                       style: TextStyle(
                         fontSize: 12,
                         color: Colors.grey,
@@ -201,18 +289,20 @@ class _RealGeolocationScreenState extends State<RealGeolocationScreen> {
                         fontSize: 14,
                         fontWeight: FontWeight.bold,
                       ),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
                     ),
                     const SizedBox(height: 16),
                     Row(
                       children: [
-                        Expanded(
-                          child: OutlinedButton.icon(
-                            onPressed: _getCurrentLocation,
-                            icon: const Icon(Icons.refresh),
-                            label: const Text('Refresh'),
-                          ),
-                        ),
-                        const SizedBox(width: 12),
+                        // Expanded(
+                        //   child: OutlinedButton.icon(
+                        //     onPressed: _getCurrentLocation,
+                        //     icon: const Icon(Icons.refresh),
+                        //     label: const Text('Refresh'),
+                        //   ),
+                        // ),
+                        // const SizedBox(width: 12),
                         Expanded(
                           flex: 2,
                           child: ElevatedButton(
@@ -221,7 +311,8 @@ class _RealGeolocationScreenState extends State<RealGeolocationScreen> {
                               backgroundColor: const Color(0xFF135BEC),
                               padding: const EdgeInsets.symmetric(vertical: 16),
                             ),
-                            child: const Text('Confirm Location'),
+                            child: const Text('Confirm Location',
+                                style: TextStyle(color: Colors.white)),
                           ),
                         ),
                       ],

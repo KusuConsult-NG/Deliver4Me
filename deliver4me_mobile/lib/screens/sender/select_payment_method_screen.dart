@@ -3,12 +3,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:deliver4me_mobile/providers/auth_provider.dart';
 import 'package:deliver4me_mobile/services/payment_service.dart';
 import 'package:deliver4me_mobile/services/user_service.dart';
+import 'package:deliver4me_mobile/services/wallet_service.dart';
 import 'package:deliver4me_mobile/services/order_service.dart';
 import 'package:deliver4me_mobile/models/order_model.dart';
 import 'package:deliver4me_mobile/config/firebase_config.dart';
 import 'package:deliver4me_mobile/screens/sender/payment_confirmation_screen.dart';
 import 'package:deliver4me_mobile/screens/payment/paystack_webview_screen.dart';
 import 'package:uuid/uuid.dart';
+import 'package:deliver4me_mobile/screens/common/identity_verification_screen.dart';
 
 class SelectPaymentMethodScreen extends ConsumerStatefulWidget {
   final String orderId;
@@ -27,13 +29,18 @@ class SelectPaymentMethodScreen extends ConsumerStatefulWidget {
 
 class _SelectPaymentMethodScreenState
     extends ConsumerState<SelectPaymentMethodScreen> {
-  final paymentService = PaymentService(FirebaseConfig.paystackPublicKey);
+  final paymentService = PaymentService(
+    FirebaseConfig.paystackPublicKey,
+    FirebaseConfig.paystackSecretKey,
+  );
   final userService = UserService();
+  final walletService = WalletService();
   final orderService = OrderService();
 
   String selectedMethod = 'card';
   bool isLoading = false;
   double walletBalance = 0.0;
+  String kycStatus = 'unverified';
 
   @override
   void initState() {
@@ -51,11 +58,12 @@ class _SelectPaymentMethodScreenState
         if (userData != null && mounted) {
           setState(() {
             walletBalance = userData.walletBalance;
+            kycStatus = userData.kycStatus;
           });
         }
       }
     } catch (e) {
-      print('Error loading wallet balance: $e');
+      debugPrint('Error loading wallet balance: $e');
     }
   }
 
@@ -94,8 +102,13 @@ class _SelectPaymentMethodScreenState
       throw Exception('Insufficient wallet balance');
     }
 
-    // Deduct from wallet
-    await userService.updateWalletBalance(userId, -widget.amount);
+    // Deduct from wallet with atomic log
+    await walletService.updateBalanceWithLog(
+      userId: userId,
+      amount: -widget.amount,
+      description: 'Payment for order: ${widget.orderId}',
+      type: 'payment',
+    );
 
     // Update order status
     await orderService.updateOrderStatus(widget.orderId, OrderStatus.pending);
@@ -184,6 +197,135 @@ class _SelectPaymentMethodScreenState
     }
   }
 
+  Future<void> _showTopUpDialog(double requiredAmount) async {
+    final amountController =
+        TextEditingController(text: requiredAmount.ceil().toString());
+
+    await showDialog(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Top Up Wallet'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+                'Insufficient balance. You need at least ₦${requiredAmount.toStringAsFixed(0)}'),
+            const SizedBox(height: 16),
+            TextField(
+              controller: amountController,
+              decoration: const InputDecoration(
+                labelText: 'Amount to Add (₦)',
+                prefixText: '₦',
+                hintText: 'Enter amount',
+              ),
+              keyboardType: TextInputType.number,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () async {
+              final amount = double.tryParse(amountController.text);
+              if (amount != null && amount > 0) {
+                Navigator.pop(dialogContext); // Close dialog
+                await _processTopUpPayment(amount); // Start payment flow
+              }
+            },
+            child: const Text('Pay & Top Up'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _processTopUpPayment(double amount) async {
+    setState(() => isLoading = true);
+    final reference = 'TOPUP_${const Uuid().v4()}';
+
+    try {
+      // 1. Initialize Paystack
+      final result = await paymentService.initializeTransaction(
+        email: ref.read(authStateProvider).value?.email ?? '',
+        amount: amount,
+        reference: reference,
+      );
+
+      final authUrl = result['authorization_url'];
+
+      if (!mounted) return;
+
+      // 2. Open Webview
+      final paymentResult = await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => PaystackWebviewScreen(
+            authorizationUrl: authUrl,
+            reference: reference,
+          ),
+        ),
+      );
+
+      // 3. Verify & Credit
+      if (paymentResult != null && paymentResult['success'] == true) {
+        final verifiedResult =
+            await paymentService.verifyTransaction(reference);
+
+        if (verifiedResult['status'] == 'success') {
+          final authState = ref.read(authStateProvider);
+          final user = authState.value;
+
+          if (user != null) {
+            // Credit Wallet
+            await walletService.updateBalanceWithLog(
+              userId: user.uid,
+              amount: amount,
+              description: 'Wallet Top Up',
+              type: 'deposit',
+            );
+
+            // Refresh UI
+            await _loadWalletBalance();
+
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text('Success! ₦$amount added to wallet.'),
+                  backgroundColor: Colors.green,
+                ),
+              );
+              // Auto-select wallet now that we have funds?
+              if (walletBalance >= widget.amount) {
+                setState(() => selectedMethod = 'wallet');
+              }
+            }
+          }
+        }
+      } else if (paymentResult?['cancelled'] == true) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('Top-up cancelled')),
+          );
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Top-up failed: $e'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => isLoading = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -223,7 +365,7 @@ class _SelectPaymentMethodScreenState
                       ),
                       const SizedBox(height: 8),
                       Text(
-                        '\$${widget.amount.toStringAsFixed(2)}',
+                        '₦${widget.amount.toStringAsFixed(2)}',
                         style: const TextStyle(
                           color: Colors.white,
                           fontSize: 32,
@@ -251,8 +393,12 @@ class _SelectPaymentMethodScreenState
                   'wallet',
                   Icons.account_balance_wallet,
                   'Deliver4Me Wallet',
-                  'Balance: \$${walletBalance.toStringAsFixed(2)}',
-                  walletBalance >= widget.amount,
+                  kycStatus == 'verified'
+                      ? 'Balance: ₦${walletBalance.toStringAsFixed(2)}'
+                      : 'Verification Required',
+                  kycStatus == 'verified', // Enable click even if low balance
+                  showTopUp:
+                      walletBalance < widget.amount && kycStatus == 'verified',
                 ),
 
                 // Card Option
@@ -267,6 +413,35 @@ class _SelectPaymentMethodScreenState
                 const SizedBox(height: 24),
 
                 // Security Badge
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Colors.amber.withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(8),
+                    border:
+                        Border.all(color: Colors.amber.withValues(alpha: 0.3)),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.info_outline,
+                          color: Colors.amber, size: 20),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          'Note: Card verification requires a valid Paystack Secret Key configured in your environment.',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: Colors.amber[700],
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 16),
+
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
@@ -310,7 +485,7 @@ class _SelectPaymentMethodScreenState
                     ),
                   ),
                   Text(
-                    '\$${widget.amount.toStringAsFixed(2)}',
+                    '₦${widget.amount.toStringAsFixed(2)}',
                     style: const TextStyle(
                       fontSize: 20,
                       fontWeight: FontWeight.bold,
@@ -339,8 +514,9 @@ class _SelectPaymentMethodScreenState
     IconData icon,
     String title,
     String subtitle,
-    bool isEnabled,
-  ) {
+    bool isEnabled, {
+    bool showTopUp = false,
+  }) {
     final isSelected = selectedMethod == value;
 
     return Opacity(
@@ -348,8 +524,35 @@ class _SelectPaymentMethodScreenState
       child: Container(
         margin: const EdgeInsets.only(bottom: 12),
         child: InkWell(
-          onTap:
-              isEnabled ? () => setState(() => selectedMethod = value) : null,
+          onTap: isEnabled
+              ? () {
+                  if (showTopUp) {
+                    _showTopUpDialog(widget.amount - walletBalance);
+                  } else {
+                    setState(() => selectedMethod = value);
+                  }
+                }
+              : () {
+                  if (value == 'wallet' && kycStatus != 'verified') {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: const Text(
+                            'Identity verification required for Wallet usage.'),
+                        action: SnackBarAction(
+                          label: 'Verify',
+                          onPressed: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                  builder: (_) =>
+                                      const IdentityVerificationScreen()),
+                            );
+                          },
+                        ),
+                      ),
+                    );
+                  }
+                },
           borderRadius: BorderRadius.circular(12),
           child: Container(
             padding: const EdgeInsets.all(16),
@@ -404,6 +607,25 @@ class _SelectPaymentMethodScreenState
                   isSelected ? Icons.check_circle : Icons.circle_outlined,
                   color: isSelected ? const Color(0xFF135BEC) : Colors.grey,
                 ),
+                if (showTopUp)
+                  Padding(
+                    padding: const EdgeInsets.only(left: 8.0),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 8, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: Colors.orange,
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: const Text(
+                        'Top Up',
+                        style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ),
               ],
             ),
           ),

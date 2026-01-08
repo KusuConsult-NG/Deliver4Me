@@ -16,23 +16,25 @@ class WelcomeScreen extends StatelessWidget {
                 child: Column(
                   children: [
                     Container(
-                      width: 48,
-                      height: 48,
+                      width: 80,
+                      height: 80,
                       decoration: BoxDecoration(
-                        color: const Color(0xFF135BEC),
-                        borderRadius: BorderRadius.circular(12),
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(16),
                         boxShadow: [
                           BoxShadow(
-                            color: const Color(0xFF135BEC).withValues(alpha: 0.3),
-                            blurRadius: 20,
+                            color: Colors.black.withValues(alpha: 0.1),
+                            blurRadius: 10,
                             offset: const Offset(0, 4),
                           ),
                         ],
                       ),
-                      child: const Icon(
-                        Icons.local_shipping,
-                        color: Colors.white,
-                        size: 28,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(16),
+                        child: Image.asset(
+                          'assets/images/logo.jpg',
+                          fit: BoxFit.cover,
+                        ),
                       ),
                     ),
                     const SizedBox(height: 12),
@@ -196,14 +198,14 @@ class WelcomeScreen extends StatelessWidget {
                       icon: Icons.inventory_2,
                       title: 'I want to Send',
                       subtitle: 'Send a package anywhere, anytime',
-                      onTap: () {},
+                      onTap: () => Navigator.pushNamed(context, '/login'),
                     ),
                     const SizedBox(height: 16),
                     _buildRoleCard(
                       icon: Icons.two_wheeler,
                       title: 'I want to Ride',
                       subtitle: 'Start earning on your daily commute',
-                      onTap: () {},
+                      onTap: () => Navigator.pushNamed(context, '/login'),
                     ),
                   ],
                 ),
@@ -226,7 +228,7 @@ class WelcomeScreen extends StatelessWidget {
                       ),
                     ),
                     GestureDetector(
-                      onTap: () {},
+                      onTap: () => Navigator.pushNamed(context, '/login'),
                       child: const Text(
                         'Log In',
                         style: TextStyle(

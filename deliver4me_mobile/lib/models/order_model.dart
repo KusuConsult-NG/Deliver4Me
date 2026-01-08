@@ -1,4 +1,5 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
 import 'package:latlong2/latlong.dart';
 
 enum OrderStatus {
@@ -22,10 +23,18 @@ class LocationData {
   });
 
   factory LocationData.fromMap(Map<String, dynamic> map) {
+    double safeDouble(dynamic val) {
+      if (val == null) return 0.0;
+      if (val is int) return val.toDouble();
+      if (val is double) return val;
+      if (val is String) return double.tryParse(val) ?? 0.0;
+      return 0.0;
+    }
+
     return LocationData(
       address: map['address'] ?? '',
-      latitude: (map['latitude'] ?? 0).toDouble(),
-      longitude: (map['longitude'] ?? 0).toDouble(),
+      latitude: safeDouble(map['latitude']),
+      longitude: safeDouble(map['longitude']),
     );
   }
 
@@ -54,10 +63,16 @@ class TimelineEvent {
   });
 
   factory TimelineEvent.fromMap(Map<String, dynamic> map) {
+    DateTime safeDate(dynamic val) {
+      if (val is Timestamp) return val.toDate();
+      if (val is String) return DateTime.tryParse(val) ?? DateTime.now();
+      return DateTime.now();
+    }
+
     return TimelineEvent(
       title: map['title'] ?? '',
       description: map['description'] ?? '',
-      timestamp: (map['timestamp'] as Timestamp).toDate(),
+      timestamp: safeDate(map['timestamp']),
       isComplete: map['isComplete'] ?? false,
     );
   }
@@ -96,7 +111,19 @@ class OrderModel {
   final String? riderName;
   final String? riderPhone;
   final Map<String, dynamic>? riderLocation;
+  final bool isUrgent;
+  final bool isASAP;
   final DateTime? estimatedArrival;
+
+  // Payment & Commission Fields
+  final double platformCommission; // 10% of price
+  final double riderEarnings; // price - platformCommission
+  final bool fundsReleasedToRider; // Auto-release on delivery
+
+  // Waiting Time Tracking
+  final DateTime? arrivedAtPickupTime;
+  final DateTime? arrivedAtDropoffTime;
+  final double waitingCharges; // ₦100/min from 2nd minute
 
   OrderModel({
     required this.id,
@@ -123,49 +150,125 @@ class OrderModel {
     this.riderPhone,
     this.riderLocation,
     this.estimatedArrival,
+    this.isUrgent = false,
+    this.isASAP = false,
+    this.platformCommission = 0.0,
+    this.riderEarnings = 0.0,
+    this.fundsReleasedToRider = false,
+    this.arrivedAtPickupTime,
+    this.arrivedAtDropoffTime,
+    this.waitingCharges = 0.0,
   });
 
   factory OrderModel.fromFirestore(DocumentSnapshot doc) {
-    final data = doc.data() as Map<String, dynamic>;
-    return OrderModel(
-      id: doc.id,
-      senderId: data['senderId'] ?? '',
-      riderId: data['riderId'],
-      status: OrderStatus.values.firstWhere(
-        (e) => e.toString().split('.').last == data['status'],
-        orElse: () => OrderStatus.pending,
-      ),
-      pickup: LocationData.fromMap(data['pickup'] ?? {}),
-      dropoff: LocationData.fromMap(data['dropoff'] ?? {}),
-      parcelDescription: data['parcelDescription'] ?? '',
-      weightCategory: data['weightCategory'] ?? '',
-      price: (data['price'] ?? 0).toDouble(),
-      paymentMethod: data['paymentMethod'] ?? '',
-      paymentStatus: data['paymentStatus'] ?? false,
-      deliveryCode: data['deliveryCode'] ?? '',
-      timeline: (data['timeline'] as List? ?? [])
-          .map((e) => TimelineEvent.fromMap(e as Map<String, dynamic>))
-          .toList(),
-      createdAt: (data['createdAt'] as Timestamp).toDate(),
-      acceptedAt: data['acceptedAt'] != null
-          ? (data['acceptedAt'] as Timestamp).toDate()
-          : null,
-      deliveredAt: data['deliveredAt'] != null
-          ? (data['deliveredAt'] as Timestamp).toDate()
-          : null,
-      pickedUpAt: data['pickedUpAt'] != null
-          ? (data['pickedUpAt'] as Timestamp).toDate()
-          : null,
-      recipientName: data['recipientName'] ?? '',
-      recipientPhone: data['recipientPhone'] ?? '',
-      notes: data['notes'] ?? '',
-      riderName: data['riderName'],
-      riderPhone: data['riderPhone'],
-      riderLocation: data['riderLocation'] as Map<String, dynamic>?,
-      estimatedArrival: data['estimatedArrival'] != null
-          ? (data['estimatedArrival'] as Timestamp).toDate()
-          : null,
-    );
+    try {
+      final data = doc.data() as Map<String, dynamic>;
+
+      // Helper for safe double parsing
+      double parseDouble(dynamic value, double defaultValue) {
+        if (value == null) return defaultValue;
+        if (value is int) return value.toDouble();
+        if (value is double) return value;
+        if (value is String) return double.tryParse(value) ?? defaultValue;
+        return defaultValue;
+      }
+
+      // Safe Date parsing
+      DateTime parseDate(dynamic value) {
+        if (value is Timestamp) return value.toDate();
+        if (value is String) return DateTime.tryParse(value) ?? DateTime.now();
+        return DateTime.now();
+      }
+
+      // Safe Date parsing (Nullable)
+      DateTime? parseDateNullable(dynamic value) {
+        if (value == null) return null;
+        if (value is Timestamp) return value.toDate();
+        if (value is String) return DateTime.tryParse(value);
+        return null;
+      }
+
+      // Safe Timeline parsing
+      List<TimelineEvent> parseTimeline(dynamic value) {
+        if (value is! List) return [];
+        return value.map((e) {
+          if (e is Map<String, dynamic>) {
+            return TimelineEvent(
+              title: e['title'] ?? '',
+              description: e['description'] ?? '',
+              timestamp: parseDate(e['timestamp']),
+              isComplete: e['isComplete'] ?? false,
+            );
+          }
+          return TimelineEvent(
+              title: 'Unknown',
+              description: '',
+              timestamp: DateTime.now(),
+              isComplete: false);
+        }).toList();
+      }
+
+      return OrderModel(
+        id: doc.id,
+        senderId: data['senderId'] ?? '',
+        riderId: data['riderId'],
+        status: OrderStatus.values.firstWhere(
+          (e) => e.toString().split('.').last == (data['status'] ?? 'pending'),
+          orElse: () => OrderStatus.pending,
+        ),
+        pickup: LocationData.fromMap(data['pickup'] is Map<String, dynamic>
+            ? data['pickup']
+            : {'address': 'Unknown', 'latitude': 0, 'longitude': 0}),
+        dropoff: LocationData.fromMap(data['dropoff'] is Map<String, dynamic>
+            ? data['dropoff']
+            : {'address': 'Unknown', 'latitude': 0, 'longitude': 0}),
+        parcelDescription: data['parcelDescription'] ?? '',
+        weightCategory: data['weightCategory'] ?? '',
+        price: parseDouble(data['price'], 0.0),
+        paymentMethod: data['paymentMethod'] ?? 'Cash',
+        paymentStatus: data['paymentStatus'] ?? false,
+        deliveryCode: data['deliveryCode'] ?? '',
+        timeline: parseTimeline(data['timeline']),
+        createdAt: parseDate(data['createdAt']),
+        acceptedAt: parseDateNullable(data['acceptedAt']),
+        deliveredAt: parseDateNullable(data['deliveredAt']),
+        pickedUpAt: parseDateNullable(data['pickedUpAt']),
+        recipientName: data['recipientName'] ?? '',
+        recipientPhone: data['recipientPhone'] ?? '',
+        notes: data['notes'] ?? '',
+        riderName: data['riderName'],
+        riderPhone: data['riderPhone'],
+        riderLocation: data['riderLocation'] as Map<String, dynamic>?,
+        estimatedArrival: parseDateNullable(data['estimatedArrival']),
+        isUrgent: data['isUrgent'] ?? false,
+        isASAP: data['isASAP'] ?? false,
+        platformCommission: parseDouble(data['platformCommission'], 0.0),
+        riderEarnings: parseDouble(data['riderEarnings'], 0.0),
+        fundsReleasedToRider: data['fundsReleasedToRider'] ?? false,
+        arrivedAtPickupTime: parseDateNullable(data['arrivedAtPickupTime']),
+        arrivedAtDropoffTime: parseDateNullable(data['arrivedAtDropoffTime']),
+        waitingCharges: parseDouble(data['waitingCharges'], 0.0),
+      );
+    } catch (e) {
+      debugPrint('Error parsing OrderModel: $e');
+      // Return a safe fallback to prevent crash
+      return OrderModel(
+        id: doc.id,
+        senderId: '',
+        status: OrderStatus.pending,
+        pickup: LocationData(address: 'Error', latitude: 0, longitude: 0),
+        dropoff: LocationData(address: 'Error', latitude: 0, longitude: 0),
+        parcelDescription: 'Error loading order',
+        weightCategory: '',
+        price: 0,
+        paymentMethod: '',
+        deliveryCode: '',
+        timeline: [],
+        createdAt: DateTime.now(),
+        recipientName: '',
+        recipientPhone: '',
+      );
+    }
   }
 
   Map<String, dynamic> toFirestore() {
@@ -194,6 +297,16 @@ class OrderModel {
       if (riderLocation != null) 'riderLocation': riderLocation,
       if (estimatedArrival != null)
         'estimatedArrival': Timestamp.fromDate(estimatedArrival!),
+      'isUrgent': isUrgent,
+      'isASAP': isASAP,
+      'platformCommission': platformCommission,
+      'riderEarnings': riderEarnings,
+      'fundsReleasedToRider': fundsReleasedToRider,
+      if (arrivedAtPickupTime != null)
+        'arrivedAtPickupTime': Timestamp.fromDate(arrivedAtPickupTime!),
+      if (arrivedAtDropoffTime != null)
+        'arrivedAtDropoffTime': Timestamp.fromDate(arrivedAtDropoffTime!),
+      'waitingCharges': waitingCharges,
     };
   }
 
@@ -222,6 +335,8 @@ class OrderModel {
     String? riderPhone,
     Map<String, dynamic>? riderLocation,
     DateTime? estimatedArrival,
+    bool? isUrgent,
+    bool? isASAP,
   }) {
     return OrderModel(
       id: id ?? this.id,
@@ -248,6 +363,8 @@ class OrderModel {
       riderPhone: riderPhone ?? this.riderPhone,
       riderLocation: riderLocation ?? this.riderLocation,
       estimatedArrival: estimatedArrival ?? this.estimatedArrival,
+      isUrgent: isUrgent ?? this.isUrgent,
+      isASAP: isASAP ?? this.isASAP,
     );
   }
 }

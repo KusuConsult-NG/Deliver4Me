@@ -38,6 +38,9 @@ class _PaystackWebviewScreenState extends State<PaystackWebviewScreen> {
             _checkPaymentStatus(url);
           },
           onNavigationRequest: (NavigationRequest request) {
+            if (_checkPaymentStatus(request.url)) {
+              return NavigationDecision.prevent;
+            }
             return NavigationDecision.navigate;
           },
         ),
@@ -45,15 +48,18 @@ class _PaystackWebviewScreenState extends State<PaystackWebviewScreen> {
       ..loadRequest(Uri.parse(widget.authorizationUrl));
   }
 
-  void _checkPaymentStatus(String url) {
+  bool _checkPaymentStatus(String url) {
     // Paystack redirects to a callback URL on success
     if (url.contains('callback') || url.contains('success')) {
       // Payment successful
       Navigator.pop(context, {'success': true, 'reference': widget.reference});
+      return true;
     } else if (url.contains('cancel') || url.contains('failed')) {
       // Payment failed or cancelled
       Navigator.pop(context, {'success': false, 'reference': widget.reference});
+      return true;
     }
+    return false;
   }
 
   @override

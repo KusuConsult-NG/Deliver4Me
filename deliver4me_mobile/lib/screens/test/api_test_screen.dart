@@ -74,7 +74,7 @@ class _ApiTestScreenState extends State<ApiTestScreen> {
 
   Future<void> _testUserService() async {
     try {
-      final userService = UserService();
+      UserService();
       _addResult('User Service', true, 'Service initialized');
     } catch (e) {
       _addResult('User Service', false, 'Error: $e');
@@ -83,7 +83,7 @@ class _ApiTestScreenState extends State<ApiTestScreen> {
 
   Future<void> _testOrderService() async {
     try {
-      final orderService = OrderService();
+      OrderService();
       _addResult('Order Service', true, 'Service initialized');
     } catch (e) {
       _addResult('Order Service', false, 'Error: $e');
@@ -92,7 +92,7 @@ class _ApiTestScreenState extends State<ApiTestScreen> {
 
   Future<void> _testPaymentService() async {
     try {
-      final paymentService = PaymentService(FirebaseConfig.paystackPublicKey);
+      PaymentService(FirebaseConfig.paystackPublicKey);
       final hasKey = FirebaseConfig.paystackPublicKey.isNotEmpty;
       _addResult('Payment Service', hasKey,
           hasKey ? 'Paystack configured' : 'No API key');

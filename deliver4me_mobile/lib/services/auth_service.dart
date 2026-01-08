@@ -28,9 +28,10 @@ class AuthService {
       );
 
       // Create user document in Firestore
-      if (credential.user != null) {
+      final user = credential.user;
+      if (user != null) {
         final userModel = UserModel(
-          id: credential.user!.uid,
+          id: user.uid,
           email: email,
           name: name,
           role: role,
@@ -39,10 +40,10 @@ class AuthService {
 
         await _firestore
             .collection('users')
-            .doc(credential.user!.uid)
+            .doc(user.uid)
             .set(userModel.toFirestore());
 
-        await credential.user!.updateDisplayName(name);
+        await user.updateDisplayName(name);
       }
 
       return credential;
@@ -67,7 +68,7 @@ class AuthService {
   }
 
   // Sign in with Google
-  Future<UserCredential?> signInWithGoogle() async {
+  Future<UserCredential?> signInWithGoogle({UserRole? selectedRole}) async {
     try {
       final GoogleSignInAccount? googleUser = await _googleSignIn.signIn();
       if (googleUser == null) return null;
@@ -83,25 +84,25 @@ class AuthService {
       final userCredential = await _auth.signInWithCredential(credential);
 
       // Check if user exists in Firestore, if not create
-      if (userCredential.user != null) {
-        final userDoc = await _firestore
-            .collection('users')
-            .doc(userCredential.user!.uid)
-            .get();
+      final user = userCredential.user;
+      if (user != null) {
+        final userDoc =
+            await _firestore.collection('users').doc(user.uid).get();
 
         if (!userDoc.exists) {
           final userModel = UserModel(
-            id: userCredential.user!.uid,
-            email: userCredential.user!.email ?? '',
-            name: userCredential.user!.displayName ?? 'User',
-            photoUrl: userCredential.user!.photoURL,
-            role: UserRole.sender, // Default role
+            id: user.uid,
+            email: user.email ?? '',
+            name: user.displayName ?? 'User',
+            photoUrl: user.photoURL,
+            role:
+                selectedRole ?? UserRole.sender, // Use selected role or default
             createdAt: DateTime.now(),
           );
 
           await _firestore
               .collection('users')
-              .doc(userCredential.user!.uid)
+              .doc(user.uid)
               .set(userModel.toFirestore());
         }
       }

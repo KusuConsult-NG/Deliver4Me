@@ -8,8 +8,15 @@ class StorageService {
   Future<String> uploadProfilePhoto(String userId, File imageFile) async {
     try {
       final ref = _storage.ref().child('profile_photos/$userId.jpg');
-      final uploadTask = await ref.putFile(imageFile);
-      return await uploadTask.ref.getDownloadURL();
+      final metadata = SettableMetadata(contentType: 'image/jpeg');
+      final uploadTask = await ref.putFile(imageFile, metadata);
+
+      // Wait a moment for consistency
+      if (uploadTask.state == TaskState.success) {
+        return await ref.getDownloadURL();
+      } else {
+        throw Exception('Upload not successful: ${uploadTask.state}');
+      }
     } catch (e) {
       throw Exception('Failed to upload photo: $e');
     }

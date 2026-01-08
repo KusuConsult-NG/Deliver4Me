@@ -4,6 +4,8 @@ import 'package:deliver4me_mobile/providers/order_provider.dart';
 import 'package:deliver4me_mobile/models/order_model.dart';
 import 'package:flutter_map/flutter_map.dart';
 import 'package:latlong2/latlong.dart';
+import 'package:deliver4me_mobile/screens/sender/edit_delivery_screen.dart';
+import 'package:deliver4me_mobile/screens/common/chat_screen.dart';
 
 class ParcelTrackerScreen extends ConsumerWidget {
   final String orderId;
@@ -18,27 +20,43 @@ class ParcelTrackerScreen extends ConsumerWidget {
     // Stream the order in real-time
     final orderStream = ref.watch(orderStreamProvider(orderId));
 
-    return Scaffold(
-      appBar: AppBar(
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => Navigator.pop(context),
-        ),
-        title: const Text('Track Parcel'),
-        centerTitle: true,
-      ),
-      body: orderStream.when(
-        data: (order) {
-          if (order == null) {
-            return const Center(child: Text('Order not found'));
-          }
+    return orderStream.when(
+      data: (order) {
+        if (order == null) {
+          return const Scaffold(body: Center(child: Text('Order not found')));
+        }
 
-          return _buildTrackingView(context, order);
-        },
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (error, stack) => Center(
-          child: Text('Error loading order: $error'),
-        ),
+        return Scaffold(
+          appBar: AppBar(
+            leading: IconButton(
+              icon: const Icon(Icons.arrow_back),
+              onPressed: () => Navigator.pop(context),
+            ),
+            title: const Text('Track Parcel'),
+            centerTitle: true,
+            actions: [
+              if (order.status == OrderStatus.pending)
+                IconButton(
+                  icon: const Icon(Icons.edit),
+                  onPressed: () {
+                    Navigator.push(
+                      context,
+                      MaterialPageRoute(
+                        builder: (_) => EditDeliveryScreen(order: order),
+                      ),
+                    );
+                  },
+                ),
+            ],
+          ),
+          body: _buildTrackingView(context, order),
+        );
+      },
+      loading: () => const Scaffold(
+        body: Center(child: CircularProgressIndicator()),
+      ),
+      error: (error, stack) => Scaffold(
+        body: Center(child: Text('Error loading order: $error')),
       ),
     );
   }
@@ -162,42 +180,127 @@ class ParcelTrackerScreen extends ConsumerWidget {
         statusText = order.status.toString().split('.').last.toUpperCase();
     }
 
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: statusColor,
-        borderRadius: BorderRadius.circular(12),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: 0.2),
-            blurRadius: 10,
+    // Calculate metrics
+    double distanceCovered = 0.0;
+    double distanceRemaining = 0.0;
+    int timeRemainingMinutes = 0;
+
+    // Average speed assumption: 30 km/h (0.5 km/min) for city traffic
+    const double avgSpeedKmPerMin = 0.5;
+
+    if (order.riderLocation != null && order.status == OrderStatus.inTransit) {
+      final riderLat = order.riderLocation!['latitude'] as double;
+      final riderLng = order.riderLocation!['longitude'] as double;
+
+      // Covered: Pickup -> Rider (Current Location)
+      distanceCovered = const Distance().as(
+          LengthUnit.Kilometer,
+          LatLng(order.pickup.latitude, order.pickup.longitude),
+          LatLng(riderLat, riderLng));
+
+      // Remaining: Rider -> Dropoff
+      distanceRemaining = const Distance().as(
+          LengthUnit.Kilometer,
+          LatLng(riderLat, riderLng),
+          LatLng(order.dropoff.latitude, order.dropoff.longitude));
+
+      timeRemainingMinutes = (distanceRemaining / avgSpeedKmPerMin).round();
+    } else if (order.riderLocation != null &&
+        order.status == OrderStatus.accepted) {
+      // Rider -> Pickup (Remaining to pickup)
+      final riderLat = order.riderLocation!['latitude'] as double;
+      final riderLng = order.riderLocation!['longitude'] as double;
+
+      distanceRemaining = const Distance().as(
+          LengthUnit.Kilometer,
+          LatLng(riderLat, riderLng),
+          LatLng(order.pickup.latitude, order.pickup.longitude));
+
+      timeRemainingMinutes = (distanceRemaining / avgSpeedKmPerMin).round();
+    }
+
+    // Ensure strictly positive
+    if (timeRemainingMinutes < 1) timeRemainingMinutes = 1;
+
+    return Column(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: statusColor,
+            borderRadius: BorderRadius.circular(12),
+            boxShadow: [
+              BoxShadow(
+                color: Colors.black.withValues(alpha: 0.2),
+                blurRadius: 10,
+              ),
+            ],
           ),
-        ],
-      ),
-      child: Row(
-        children: [
-          const Icon(Icons.info_outline, color: Colors.white),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              statusText,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 16,
+          child: Row(
+            children: [
+              const Icon(Icons.info_outline, color: Colors.white),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  statusText,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+              if (order.estimatedArrival != null)
+                Text(
+                  'ETA: ${_formatTime(order.estimatedArrival!)}',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 14,
+                  ),
+                ),
+            ],
+          ),
+        ),
+        if (order.status == OrderStatus.inTransit ||
+            order.status == OrderStatus.accepted)
+          Container(
+            margin: const EdgeInsets.only(top: 12),
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.circular(12),
+              boxShadow: [
+                BoxShadow(
+                    color: Colors.black.withValues(alpha: 0.1), blurRadius: 10)
+              ],
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceAround,
+              children: [
+                _buildMetric(
+                    'Covered', '${distanceCovered.toStringAsFixed(1)} km'),
+                _buildMetric('Distance Left',
+                    '${distanceRemaining.toStringAsFixed(1)} km'),
+                _buildMetric('Time Left', '$timeRemainingMinutes min',
+                    isHighlight: true),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildMetric(String label, String value, {bool isHighlight = false}) {
+    return Column(
+      children: [
+        Text(label, style: const TextStyle(color: Colors.grey, fontSize: 12)),
+        const SizedBox(height: 4),
+        Text(value,
+            style: TextStyle(
                 fontWeight: FontWeight.bold,
-              ),
-            ),
-          ),
-          if (order.estimatedArrival != null)
-            Text(
-              'ETA: ${_formatTime(order.estimatedArrival!)}',
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 14,
-              ),
-            ),
-        ],
-      ),
+                fontSize: 16,
+                color: isHighlight ? const Color(0xFF135BEC) : Colors.black)),
+      ],
     );
   }
 
@@ -249,10 +352,10 @@ class ParcelTrackerScreen extends ConsumerWidget {
                   const SizedBox(height: 8),
                   Row(
                     children: [
-                      CircleAvatar(
+                      const CircleAvatar(
                         radius: 24,
                         backgroundColor: Color(0xFF135BEC),
-                        child: const Icon(Icons.person, color: Colors.white),
+                        child: Icon(Icons.person, color: Colors.white),
                       ),
                       const SizedBox(width: 12),
                       Expanded(
@@ -279,7 +382,24 @@ class ParcelTrackerScreen extends ConsumerWidget {
                       IconButton(
                         icon: const Icon(Icons.phone),
                         onPressed: () {
-                          // Call rider
+                          ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(
+                                  content: Text('Call feature mock')));
+                        },
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.chat),
+                        onPressed: () {
+                          Navigator.push(
+                            context,
+                            MaterialPageRoute(
+                              builder: (_) => ChatScreen(
+                                orderId: order.id,
+                                otherUserName: order.riderName ?? 'Rider',
+                                otherUserId: order.riderId!,
+                              ),
+                            ),
+                          );
                         },
                       ),
                     ],
@@ -298,31 +418,18 @@ class ParcelTrackerScreen extends ConsumerWidget {
                 ),
                 const SizedBox(height: 16),
 
-                _buildTimelineItem(
-                  'Order Confirmed',
-                  _formatTime(order.createdAt),
-                  true,
-                ),
-                if (order.acceptedAt != null)
-                  _buildTimelineItem(
-                    'Rider Assigned',
-                    _formatTime(order.acceptedAt!),
-                    true,
-                  ),
-                if (order.pickedUpAt != null)
-                  _buildTimelineItem(
-                    'Package Picked Up',
-                    _formatTime(order.pickedUpAt!),
-                    true,
-                  ),
-                _buildTimelineItem(
-                  'Delivered',
-                  order.deliveredAt != null
-                      ? _formatTime(order.deliveredAt!)
-                      : 'Pending',
-                  order.deliveredAt != null,
-                  isLast: true,
-                ),
+                ...order.timeline.asMap().entries.map((entry) {
+                  final index = entry.key;
+                  final event = entry.value;
+                  final isLast = index == order.timeline.length - 1;
+
+                  return _buildTimelineItem(
+                    event.title,
+                    _formatTime(event.timestamp),
+                    event.isComplete,
+                    isLast: isLast,
+                  );
+                }),
 
                 const SizedBox(height: 16),
 
@@ -438,6 +545,6 @@ class ParcelTrackerScreen extends ConsumerWidget {
   String _formatTime(DateTime time) {
     final hour = time.hour % 12 == 0 ? 12 : time.hour % 12;
     final period = time.hour >= 12 ? 'PM' : 'AM';
-    return '${hour}:${time.minute.toString().padLeft(2, '0')} $period';
+    return '$hour:${time.minute.toString().padLeft(2, '0')} $period';
   }
 }

@@ -11,7 +11,7 @@ class _TutorialScreenState extends State<TutorialScreen> {
   int currentPage = 0;
   final PageController _pageController = PageController();
 
-  final List<TutorialPage> pages = [
+  final List<TutorialPage> pages = const [
     TutorialPage(
       title: 'Job Marketplace',
       description:
@@ -54,7 +54,8 @@ class _TutorialScreenState extends State<TutorialScreen> {
                     decoration: BoxDecoration(
                       color: const Color(0xFF232F48),
                       borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: Colors.white.withValues(alpha: 0.05)),
+                      border: Border.all(
+                          color: Colors.white.withValues(alpha: 0.05)),
                     ),
                     child: const Row(
                       children: [
@@ -72,7 +73,8 @@ class _TutorialScreenState extends State<TutorialScreen> {
                     ),
                   ),
                   TextButton(
-                    onPressed: () => Navigator.pop(context),
+                    onPressed: () =>
+                        Navigator.pushReplacementNamed(context, '/home'),
                     child: const Text(
                       'Skip',
                       style: TextStyle(
@@ -137,7 +139,7 @@ class _TutorialScreenState extends State<TutorialScreen> {
                         curve: Curves.easeInOut,
                       );
                     } else {
-                      Navigator.pop(context);
+                      Navigator.pushReplacementNamed(context, '/home');
                     }
                   },
                   style: ElevatedButton.styleFrom(
@@ -314,7 +316,7 @@ class TutorialPage {
   final IconData icon;
   final Color color;
 
-  TutorialPage({
+  const TutorialPage({
     required this.title,
     required this.description,
     required this.icon,

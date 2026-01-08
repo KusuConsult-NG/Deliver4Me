@@ -1,7 +1,37 @@
 import 'package:flutter/material.dart';
+import 'package:permission_handler/permission_handler.dart';
 
-class PermissionsScreen extends StatelessWidget {
+class PermissionsScreen extends StatefulWidget {
   const PermissionsScreen({super.key});
+
+  @override
+  State<PermissionsScreen> createState() => _PermissionsScreenState();
+}
+
+class _PermissionsScreenState extends State<PermissionsScreen> {
+  bool _locationGranted = false;
+  bool _notificationGranted = false;
+  bool _cameraGranted = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkPermissions();
+  }
+
+  Future<void> _checkPermissions() async {
+    final location = await Permission.location.status;
+    final notification = await Permission.notification.status;
+    final camera = await Permission.camera.status;
+
+    if (mounted) {
+      setState(() {
+        _locationGranted = location.isGranted;
+        _notificationGranted = notification.isGranted;
+        _cameraGranted = camera.isGranted;
+      });
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -28,35 +58,41 @@ class PermissionsScreen extends StatelessWidget {
               'To provide the best delivery experience, Deliver4Me needs access to a few things on your device.',
               style: TextStyle(fontSize: 16, color: Colors.grey[600]),
             ),
-
             const SizedBox(height: 32),
-
-            _buildPermissionItem(
+            _buildPermissionSwitch(
               icon: Icons.location_on,
               title: 'Location Services',
               description:
                   'Required to match you with nearby jobs and track parcel routes accurately.',
-              buttonText: 'Allow',
+              value: _locationGranted,
+              onChanged: (val) async {
+                if (val) await Permission.location.request();
+                _checkPermissions();
+              },
             ),
-
             const SizedBox(height: 24),
-
-            _buildPermissionItem(
+            _buildPermissionSwitch(
               icon: Icons.notifications,
               title: 'Push Notifications',
               description:
                   'Get instant updates on new job offers, delivery status changes, and payout confirmations.',
-              buttonText: 'Allow',
+              value: _notificationGranted,
+              onChanged: (val) async {
+                if (val) await Permission.notification.request();
+                _checkPermissions();
+              },
             ),
-
             const SizedBox(height: 24),
-
-            _buildPermissionItem(
+            _buildPermissionSwitch(
               icon: Icons.camera_alt,
               title: 'Camera Access',
               description:
                   'Needed to scan parcel barcodes for pickup and verify proof of delivery with photos.',
-              buttonText: 'Allow',
+              value: _cameraGranted,
+              onChanged: (val) async {
+                if (val) await Permission.camera.request();
+                _checkPermissions();
+              },
             ),
           ],
         ),
@@ -88,9 +124,19 @@ class PermissionsScreen extends StatelessWidget {
               ),
               const SizedBox(height: 16),
               ElevatedButton(
-                onPressed: () {},
+                onPressed: () async {
+                  await [
+                    Permission.location,
+                    Permission.camera,
+                    Permission.notification,
+                  ].request();
+                  if (context.mounted) {
+                    Navigator.pushReplacementNamed(context, '/tutorial');
+                  }
+                },
                 style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFF135BEC),
+                  foregroundColor: Colors.white, // Force text color to white
                   minimumSize: const Size(double.infinity, 48),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
@@ -103,7 +149,9 @@ class PermissionsScreen extends StatelessWidget {
               ),
               const SizedBox(height: 12),
               TextButton(
-                onPressed: () {},
+                onPressed: () {
+                  Navigator.pushReplacementNamed(context, '/tutorial');
+                },
                 child: const Text(
                   'Maybe Later',
                   style: TextStyle(fontSize: 14, color: Colors.grey),
@@ -116,11 +164,12 @@ class PermissionsScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildPermissionItem({
+  Widget _buildPermissionSwitch({
     required IconData icon,
     required String title,
     required String description,
-    required String buttonText,
+    required bool value,
+    required Function(bool) onChanged,
   }) {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -149,22 +198,10 @@ class PermissionsScreen extends StatelessWidget {
                       fontWeight: FontWeight.w600,
                     ),
                   ),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 4,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.grey[200],
-                      borderRadius: BorderRadius.circular(20),
-                    ),
-                    child: Text(
-                      buttonText,
-                      style: const TextStyle(
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
+                  Switch(
+                    value: value,
+                    onChanged: onChanged,
+                    activeTrackColor: const Color(0xFF135BEC),
                   ),
                 ],
               ),
